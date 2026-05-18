@@ -1,18 +1,63 @@
-import { Button } from "@/components/ui/button"
+import { useState, useCallback } from "react"
+import { LandingPage } from "@/pages/landing"
+import { RoomPage } from "@/pages/room"
+import { useWebRTC } from "@/hooks/use-webrtc"
+
+type View = "landing" | "room"
 
 export function App() {
+  const [view, setView] = useState<View>("landing")
+  const {
+    localStream,
+    remoteStream,
+    connectionState,
+    connect,
+    disconnect,
+    toggleMic,
+    toggleCamera,
+    isMicOn,
+    isCameraOn,
+  } = useWebRTC()
+
+  const handleConnect = useCallback(async () => {
+    setView("room")
+    await connect()
+  }, [connect])
+
+  const handleDisconnect = useCallback(() => {
+    disconnect()
+    setView("landing")
+  }, [disconnect])
+
   return (
-    <div className="flex min-h-svh p-6">
-      <div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
-        <div>
-          <h1 className="font-medium">Project ready!</h1>
-          <p>You may now add components and start building.</p>
-          <p>We&apos;ve already added the button component for you.</p>
-          <Button className="mt-2">Button</Button>
-        </div>
-        <div className="font-mono text-xs text-muted-foreground">
-          (Press <kbd>d</kbd> to toggle dark mode)
-        </div>
+    <div className="relative min-h-svh overflow-hidden bg-[#0a0a0a]">
+      <div
+        className={`absolute inset-0 transition-opacity duration-500 ${
+          view === "landing"
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0"
+        }`}
+      >
+        <LandingPage onConnect={handleConnect} />
+      </div>
+
+      <div
+        className={`absolute inset-0 transition-opacity duration-500 ${
+          view === "room"
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0"
+        }`}
+      >
+        <RoomPage
+          localStream={localStream}
+          remoteStream={remoteStream}
+          connectionState={connectionState}
+          isMicOn={isMicOn}
+          isCameraOn={isCameraOn}
+          onToggleMic={toggleMic}
+          onToggleCamera={toggleCamera}
+          onDisconnect={handleDisconnect}
+        />
       </div>
     </div>
   )
