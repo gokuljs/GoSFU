@@ -16,3 +16,12 @@ func Decode(in string, obj *webrtc.SessionDescription) {
 		panic(err)
 	}
 }
+
+func Encode(obj *webrtc.SessionDescription) string {
+	b, err := json.Marshal(obj)
+	if err != nil {
+		panic(err)
+	}
+
+	return base64.StdEncoding.EncodeToString(b)
+}
