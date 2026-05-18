@@ -5,44 +5,61 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
 
 	"github.com/gokuljs/goSfu/pkg/config"
+	"github.com/gokuljs/goSfu/pkg/logger"
 	"github.com/gokuljs/goSfu/pkg/server"
 	"github.com/gokuljs/goSfu/pkg/sfu"
 	"github.com/pion/webrtc/v4"
 )
 
 func main() {
-	port := flag.Int("port", 8080, "http server port")
+	port := flag.Int("port", config.DEFAULT_PORT, "http server port")
+	env := flag.String("env", "development", "environment: development or production")
 	flag.Parse()
+
+	log := logger.Init(logger.EnvFromString(*env))
+	log.Info("starting Go SFU server", "port", *port, "env", *env)
+
 	sdpChan := server.HttpSdpServer(*port)
+	log.Info("signaling server ready", "addr", "http://localhost:"+itoa(*port))
+
 	offer := webrtc.SessionDescription{}
+	log.Info("waiting for publisher SDP offer...")
 	server.Decode(<-sdpChan, &offer)
+	log.Debug("received publisher offer", "type", offer.Type.String())
 
 	peerConnection, err := sfu.CreatePeerConnectionWithInterceptors(config.STUN_SERVER)
 	if err != nil {
-		panic(err)
+		log.Error("failed to create peer connection", "error", err)
+		os.Exit(1)
 	}
 
 	defer func() {
 		if cErr := peerConnection.Close(); cErr != nil {
-			fmt.Printf("cannot close peerConnection: %v\n", cErr)
+			log.Warn("failed to close peer connection", "error", cErr)
 		}
 	}()
 
-	// Adding one video track
 	if _, err = peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo); err != nil {
-		panic(err)
+		log.Error("failed to add video transceiver", "error", err)
+		os.Exit(1)
 	}
 
 	localTrackChan := make(chan *webrtc.TrackLocalStaticRTP)
-	// Set a handler for when a new remote track starts, this just distributes all our packets
-	// to connected peers
+
 	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) { //nolint: revive
-		// Create a local track, all our SFU clients will be fed via this track
+		log.Info("received remote track",
+			"codec", remoteTrack.Codec().MimeType,
+			"ssrc", remoteTrack.SSRC(),
+		)
+
 		localTrack, newTrackErr := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, "video", "pion")
 		if newTrackErr != nil {
-			panic(newTrackErr)
+			log.Error("failed to create local track", "error", newTrackErr)
+			return
 		}
 		localTrackChan <- localTrack
 
@@ -50,53 +67,52 @@ func main() {
 		for {
 			i, _, readErr := remoteTrack.Read(rtpBuf)
 			if readErr != nil {
-				panic(readErr)
+				log.Error("remote track read error", "error", readErr)
+				return
 			}
 
-			// ErrClosedPipe means we don't have any subscribers, this is ok if no peers have connected yet
 			if _, err = localTrack.Write(rtpBuf[:i]); err != nil && !errors.Is(err, io.ErrClosedPipe) {
-				panic(err)
+				log.Error("local track write error", "error", err)
+				return
 			}
 		}
 	})
-	// Set the remote SessionDescription
+
 	err = peerConnection.SetRemoteDescription(offer)
 	if err != nil {
-		panic(err)
+		log.Error("failed to set remote description", "error", err)
+		os.Exit(1)
 	}
 
-	// Create answer
 	answer, err := peerConnection.CreateAnswer(nil)
 	if err != nil {
-		panic(err)
+		log.Error("failed to create answer", "error", err)
+		os.Exit(1)
 	}
 
-	// Create channel that is blocked until ICE Gathering is complete
 	gatherComplete := webrtc.GatheringCompletePromise(peerConnection)
 
-	// Sets the LocalDescription, and starts our UDP listeners
 	err = peerConnection.SetLocalDescription(answer)
 	if err != nil {
-		panic(err)
+		log.Error("failed to set local description", "error", err)
+		os.Exit(1)
 	}
 
-	// Block until ICE Gathering is complete, disabling trickle ICE
-	// we do this because we only can exchange one signaling message
-	// in a production application you should exchange ICE Candidates via OnICECandidate
 	<-gatherComplete
+	log.Info("ICE gathering complete for publisher")
 
-	// Get the LocalDescription and take it to base64 so we can paste in browser
-	fmt.Println(server.Encode(peerConnection.LocalDescription()))
+	slog.Debug("publisher answer SDP", "sdp", server.Encode(peerConnection.LocalDescription()))
 
 	localTrack := <-localTrackChan
+	log.Info("local track ready, accepting subscribers")
+
 	for {
-		fmt.Println("")
-		fmt.Println("Curl an base64 SDP to start sendonly peer connection")
+		log.Info("waiting for subscriber SDP offer...")
 
 		recvOnlyOffer := webrtc.SessionDescription{}
 		server.Decode(<-sdpChan, &recvOnlyOffer)
+		log.Debug("received subscriber offer", "type", recvOnlyOffer.Type.String())
 
-		// Create a new PeerConnection
 		peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{
 			ICEServers: []webrtc.ICEServer{
 				{
@@ -105,17 +121,16 @@ func main() {
 			},
 		})
 		if err != nil {
-			panic(err)
+			log.Error("failed to create subscriber peer connection", "error", err)
+			continue
 		}
 
 		rtpSender, err := peerConnection.AddTrack(localTrack)
 		if err != nil {
-			panic(err)
+			log.Error("failed to add track to subscriber", "error", err)
+			continue
 		}
 
-		// Read incoming RTCP packets
-		// Before these packets are returned they are processed by interceptors. For things
-		// like NACK this needs to be called.
 		go func() {
 			rtcpBuf := make([]byte, 1500)
 			for {
@@ -125,33 +140,32 @@ func main() {
 			}
 		}()
 
-		// Set the remote SessionDescription
 		err = peerConnection.SetRemoteDescription(recvOnlyOffer)
 		if err != nil {
-			panic(err)
+			log.Error("subscriber: failed to set remote description", "error", err)
+			continue
 		}
 
-		// Create answer
 		answer, err := peerConnection.CreateAnswer(nil)
 		if err != nil {
-			panic(err)
+			log.Error("subscriber: failed to create answer", "error", err)
+			continue
 		}
 
-		// Create channel that is blocked until ICE Gathering is complete
 		gatherComplete = webrtc.GatheringCompletePromise(peerConnection)
 
-		// Sets the LocalDescription, and starts our UDP listeners
 		err = peerConnection.SetLocalDescription(answer)
 		if err != nil {
-			panic(err)
+			log.Error("subscriber: failed to set local description", "error", err)
+			continue
 		}
 
-		// Block until ICE Gathering is complete, disabling trickle ICE
-		// we do this because we only can exchange one signaling message
-		// in a production application you should exchange ICE Candidates via OnICECandidate
 		<-gatherComplete
-
-		// Get the LocalDescription and take it to base64 so we can paste in browser
-		fmt.Println(server.Encode(peerConnection.LocalDescription()))
+		log.Info("subscriber connected, ICE gathering complete")
+		slog.Debug("subscriber answer SDP", "sdp", server.Encode(peerConnection.LocalDescription()))
 	}
+}
+
+func itoa(n int) string {
+	return fmt.Sprintf("%d", n)
 }

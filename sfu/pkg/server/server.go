@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 )
@@ -18,7 +19,11 @@ func HttpSdpServer(port int) chan string {
 	}
 	srv.setupRoutes()
 	go func() {
-		panic(http.ListenAndServe(":"+strconv.Itoa(port), nil))
+		addr := ":" + strconv.Itoa(port)
+		slog.Info("HTTP server listening", "addr", addr)
+		if err := http.ListenAndServe(addr, nil); err != nil {
+			slog.Error("HTTP server crashed", "error", err)
+		}
 	}()
 	return sdpChan
 }
