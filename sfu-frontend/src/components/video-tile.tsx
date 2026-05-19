@@ -1,5 +1,4 @@
 import { useRef, useEffect, useState } from "react"
-import { User } from "@phosphor-icons/react"
 import { Orb, type AgentState } from "@/components/ui/orb"
 import { ShimmeringText } from "@/components/ui/shimmering-text"
 
@@ -47,7 +46,20 @@ export function VideoTile({
           ? "Speaking..."
           : "Idle"
 
-  const hasVideo = stream && stream.getVideoTracks().length > 0
+  const [videoEnabled, setVideoEnabled] = useState(true)
+
+  useEffect(() => {
+    if (!stream) return
+    const checkVideo = () => {
+      const videoTrack = stream.getVideoTracks()[0]
+      setVideoEnabled(!!videoTrack && videoTrack.enabled)
+    }
+    checkVideo()
+    const interval = setInterval(checkVideo, 300)
+    return () => clearInterval(interval)
+  }, [stream])
+
+  const hasVideo = stream && stream.getVideoTracks().length > 0 && videoEnabled
 
   return (
     <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-xl bg-black">
@@ -60,11 +72,12 @@ export function VideoTile({
           className="h-full w-full object-cover"
         />
       ) : type === "human" ? (
-        <div className="flex flex-col items-center gap-3">
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/5 sm:h-24 sm:w-24">
-            <User className="h-10 w-10 text-white/25 sm:h-12 sm:w-12" />
-          </div>
-          <span className="text-xs text-white/25">You</span>
+        <div className="flex items-center justify-center">
+          <img
+            src="/avatar.png"
+            alt="You"
+            className="h-32 w-32 rounded-full object-cover opacity-90 sm:h-36 sm:w-36"
+          />
         </div>
       ) : (
         <div className="flex flex-col items-center gap-5">
