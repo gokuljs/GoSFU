@@ -30,7 +30,7 @@ export function App() {
   }, [disconnect])
 
   return (
-    <div className="relative min-h-svh overflow-hidden bg-[#0a0a0a]">
+    <div className="relative min-h-svh overflow-hidden bg-black">
       <div
         className={`absolute inset-0 transition-opacity duration-500 ${
           view === "landing"

@@ -6,6 +6,7 @@ import {
   PhoneDisconnect,
 } from "@phosphor-icons/react"
 import { VideoTile } from "@/components/video-tile"
+import { LiveWaveform } from "@/components/ui/live-waveform"
 import { Button } from "@/components/ui/button"
 import type { ConnectionState } from "@/hooks/use-webrtc"
 
@@ -31,7 +32,7 @@ export function RoomPage({
   onDisconnect,
 }: RoomPageProps) {
   return (
-    <div className="flex min-h-svh flex-col bg-[#0a0a0a]">
+    <div className="flex min-h-svh flex-col bg-black">
       {/* Header */}
       <header className="flex items-center justify-between border-b border-white/5 px-4 py-3 sm:px-6">
         <div className="flex items-center gap-2">
@@ -45,21 +46,33 @@ export function RoomPage({
           </span>
         </div>
         <span className="text-xs font-medium tracking-wide text-white/40">
-          Go SFU
+          GO SFU
         </span>
       </header>
 
       {/* Video Grid */}
       <main className="flex flex-1 items-center justify-center p-3 sm:p-6">
         <div className="grid w-full max-w-5xl grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2">
-          <VideoTile stream={localStream} muted label="You" />
-          <VideoTile
-            stream={remoteStream}
-            label="Remote"
-            isAvatar={!remoteStream || remoteStream.getTracks().length === 0}
-          />
+          <VideoTile stream={localStream} muted label="You" type="human" />
+          <VideoTile stream={remoteStream} label="Agent" type="agent" />
         </div>
       </main>
+
+      {/* Waveform indicator */}
+      <div className="flex justify-center px-4 pb-2">
+        <div className="w-full max-w-md">
+          <LiveWaveform
+            active={isMicOn}
+            height={40}
+            barWidth={2}
+            barGap={2}
+            barColor="rgba(255, 255, 255, 0.4)"
+            mode="static"
+            fadeEdges={true}
+            sensitivity={1.5}
+          />
+        </div>
+      </div>
 
       {/* Controls Toolbar */}
       <footer className="flex items-center justify-center gap-3 border-t border-white/5 px-4 py-4">
