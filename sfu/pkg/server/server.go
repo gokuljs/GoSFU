@@ -1,29 +1,22 @@
 package server
 
 import (
-	"log/slog"
+	"fmt"
 	"net/http"
-	"strconv"
+
+	"github.com/gokuljs/goSfu/pkg/room"
 )
 
 type Server struct {
-	port    int
-	sdpChan chan string
+	port  int
+	rooms *room.Manager
 }
 
-func HttpSdpServer(port int) chan string {
-	sdpChan := make(chan string)
-	srv := &Server{
-		port:    port,
-		sdpChan: sdpChan,
-	}
-	srv.setupRoutes()
-	go func() {
-		addr := ":" + strconv.Itoa(port)
-		slog.Info("HTTP server listening", "addr", addr)
-		if err := http.ListenAndServe(addr, nil); err != nil {
-			slog.Error("HTTP server crashed", "error", err)
-		}
-	}()
-	return sdpChan
+func New(port int, rooms *room.Manager) *Server {
+	return &Server{port: port, rooms: rooms}
+}
+
+func (s *Server) ListenAndServe() error {
+	addr := fmt.Sprintf(":%d", s.port)
+	return http.ListenAndServe(addr, s.routes())
 }
