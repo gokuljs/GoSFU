@@ -17,7 +17,6 @@ func main() {
 	flag.Parse()
 	logger.Init(logger.EnvFromString(*env))
 	slog.Info("starting server", "port", *port)
-
 	manager := room.NewManager()
 	srv := server.New(*port, manager)
 
