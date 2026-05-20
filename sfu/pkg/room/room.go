@@ -1,6 +1,13 @@
 package room
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"sync"
+
+	"github.com/gokuljs/goSfu/pkg/config"
+	"github.com/pion/webrtc/v4"
+)
 
 type State string
 
@@ -22,16 +29,26 @@ type Participant struct {
 }
 
 type Room struct {
+	mu           sync.Mutex
 	Id           string
 	State        State
 	Participants []Participant
+	audioPath    string
+	onClose      func(string)
+	ctx          context.Context
+	cancel       context.CancelFunc
+	pc           *webrtc.PeerConnection
 }
 
 func NewRoom(id string) *Room {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Room{
 		Id:           id,
 		State:        StateWaiting,
 		Participants: []Participant{},
+		audioPath:    config.DEFAULT_AUDIO_SAMPLE_FILE,
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 }
 
