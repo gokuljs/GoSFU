@@ -39,8 +39,13 @@ type Room struct {
 	cancel       context.CancelFunc
 	pc           *webrtc.PeerConnection
 }
+type JoinResult struct {
+	Sdp           webrtc.SessionDescription `json:"sdp"`
+	ParticipantId string                    `json:"participantId"`
+	RoomId        string                    `json:"roomId"`
+}
 
-func NewRoom(id string) *Room {
+func NewRoom(id string, onClose func(string)) *Room {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Room{
 		Id:           id,
@@ -49,6 +54,7 @@ func NewRoom(id string) *Room {
 		audioPath:    config.DEFAULT_AUDIO_SAMPLE_FILE,
 		ctx:          ctx,
 		cancel:       cancel,
+		onClose:      onClose,
 	}
 }
 
