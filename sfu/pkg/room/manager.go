@@ -23,7 +23,9 @@ func NewManager() *Manager {
 
 func (m *Manager) Create() string {
 	id := uuid.New().String()
-	room := NewRoom(id)
+	room := NewRoom(id, func(roomCloseId string) {
+		m.Delete(roomCloseId)
+	})
 	m.mu.Lock()
 	m.rooms[id] = room
 	m.mu.Unlock()
