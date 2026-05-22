@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/gokuljs/goSfu/pkg/agent"
 	"github.com/gokuljs/goSfu/pkg/config"
 	"github.com/gokuljs/goSfu/pkg/sfu"
 	"github.com/google/uuid"
@@ -41,6 +42,7 @@ type Room struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	pc           *webrtc.PeerConnection
+	agent        *agent.Agent
 }
 type JoinResult struct {
 	Sdp           webrtc.SessionDescription `json:"sdp"`
@@ -93,15 +95,26 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 		go r.drainTrack(track)
 	})
 
-	// check if disconnected
+	ag, err := agent.New(r.ctx, pc, r.audioPath)
+	if err != nil {
+		r.cleanupLocked()
+		return nil, err
+	}
+	r.agent = ag
+
+	var agentStarted sync.Once
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		slog.Info("pc state", "room", r.Id, "state", state.String())
+		if state == webrtc.PeerConnectionStateConnected {
+			agentStarted.Do(func() { ag.Start() })
+		}
 		if state == webrtc.PeerConnectionStateFailed ||
 			state == webrtc.PeerConnectionStateClosed ||
 			state == webrtc.PeerConnectionStateDisconnected {
 			r.Close()
 		}
 	})
+
 	if err := pc.SetRemoteDescription(offer); err != nil {
 		r.cleanupLocked()
 		return nil, err
@@ -121,10 +134,6 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 	}
 	// basically waiting for all ice setup done
 	<-gatherComplete
-	if err := pc.SetLocalDescription(answer); err != nil {
-		r.cleanupLocked()
-		return nil, err
-	}
 	r.State = StateActive
 	slog.Info("room active", "room", r.Id, "participant", participantId)
 	return &JoinResult{
@@ -165,6 +174,10 @@ func (r *Room) Close() {
 func (r *Room) cleanupLocked() {
 	r.State = StateClosed
 	r.cancel()
+	if r.agent != nil {
+		r.agent.Stop()
+		r.agent = nil
+	}
 	if r.pc != nil {
 		_ = r.pc.Close()
 		r.pc = nil

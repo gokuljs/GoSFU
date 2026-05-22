@@ -73,9 +73,7 @@ export function useWebRTC(): UseWebRTCReturn {
       setRemoteStream(remote)
 
       pc.ontrack = (event) => {
-        event.streams[0]?.getTracks().forEach((track) => {
-          remote.addTrack(track)
-        })
+        remote.addTrack(event.track)
       }
 
       stream.getTracks().forEach((track) => {

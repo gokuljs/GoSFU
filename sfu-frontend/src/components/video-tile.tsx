@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from "react"
 import { Orb, type AgentState } from "@/components/ui/orb"
 import { ShimmeringText } from "@/components/ui/shimmering-text"
+import { useStreamAudioLevel } from "@/hooks/use-stream-audio-level"
 
 type TileType = "human" | "agent"
 
@@ -18,7 +19,10 @@ export function VideoTile({
   type = "human",
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [agentState, setAgentState] = useState<AgentState>("listening")
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const { levelRef, isSpeaking, hasAudio } = useStreamAudioLevel(
+    type === "agent" ? stream : null
+  )
 
   useEffect(() => {
     if (videoRef.current && stream) {
@@ -27,23 +31,39 @@ export function VideoTile({
   }, [stream])
 
   useEffect(() => {
-    if (type !== "agent") return
-    const states: AgentState[] = ["listening", "thinking", "talking", null]
-    let idx = 0
-    const interval = setInterval(() => {
-      idx = (idx + 1) % states.length
-      setAgentState(states[idx])
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [type])
+    if (type !== "agent" || !audioRef.current || !stream) return
+
+    const el = audioRef.current
+    const play = () => {
+      el.srcObject = stream
+      void el.play().catch(() => {})
+    }
+
+    play()
+    stream.addEventListener("addtrack", play)
+    return () => {
+      stream.removeEventListener("addtrack", play)
+      el.pause()
+      el.srcObject = null
+    }
+  }, [stream, type])
+
+  const agentState: AgentState =
+    type === "agent"
+      ? isSpeaking
+        ? "talking"
+        : hasAudio
+          ? "listening"
+          : null
+      : null
 
   const stateLabel =
     agentState === "listening"
       ? "Listening..."
-      : agentState === "thinking"
-        ? "Processing..."
-        : agentState === "talking"
-          ? "Speaking..."
+      : agentState === "talking"
+        ? "Speaking..."
+        : stream
+          ? "Connecting..."
           : "Idle"
 
   const [videoEnabled, setVideoEnabled] = useState(true)
@@ -63,6 +83,10 @@ export function VideoTile({
 
   return (
     <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-xl bg-black">
+      {type === "agent" && (
+        <audio ref={audioRef} autoPlay playsInline className="hidden" />
+      )}
+
       {type === "human" && hasVideo ? (
         <video
           ref={videoRef}
@@ -85,6 +109,8 @@ export function VideoTile({
             <Orb
               colors={["#6366f1", "#a78bfa"]}
               agentState={agentState}
+              volumeMode="manual"
+              outputVolumeRef={levelRef}
               seed={42}
             />
           </div>
