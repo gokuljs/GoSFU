@@ -8,6 +8,8 @@ export type ConnectionState = "idle" | "connecting" | "connected" | "failed"
 interface UseWebRTCReturn {
   localStream: MediaStream | null
   remoteStream: MediaStream | null
+  roomId: string | null
+  participantId: string | null
   connectionState: ConnectionState
   connect: () => Promise<void>
   disconnect: () => void
@@ -34,6 +36,8 @@ function waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
 export function useWebRTC(): UseWebRTCReturn {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
+  const [roomId, setRoomId] = useState<string | null>(null)
+  const [participantId, setParticipantId] = useState<string | null>(null)
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("idle")
   const [isMicOn, setIsMicOn] = useState(true)
@@ -45,6 +49,15 @@ export function useWebRTC(): UseWebRTCReturn {
   const connect = useCallback(async () => {
     try {
       setConnectionState("connecting")
+
+      const createRes = await fetch(`${SFU_URL}/room/create`, {
+        method: "POST",
+      })
+      if (!createRes.ok) {
+        throw new Error(`Create failed: ${createRes.status}`)
+      }
+      const { roomId: newRoomId } = await createRes.json()
+      setRoomId(newRoomId)
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
@@ -60,9 +73,7 @@ export function useWebRTC(): UseWebRTCReturn {
       setRemoteStream(remote)
 
       pc.ontrack = (event) => {
-        event.streams[0]?.getTracks().forEach((track) => {
-          remote.addTrack(track)
-        })
+        remote.addTrack(event.track)
       }
 
       stream.getTracks().forEach((track) => {
@@ -71,24 +82,20 @@ export function useWebRTC(): UseWebRTCReturn {
 
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
-
       await waitForIceGathering(pc)
 
-      const encoded = btoa(JSON.stringify(pc.localDescription))
-      const res = await fetch(SFU_URL, {
+      const joinRes = await fetch(`${SFU_URL}/room/${newRoomId}/join`, {
         method: "POST",
-        body: encoded,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sdp: pc.localDescription }),
       })
-
-      if (!res.ok) {
-        throw new Error(`Server responded with ${res.status}`)
+      if (!joinRes.ok) {
+        throw new Error(`Join failed: ${joinRes.status}`)
       }
 
-      const answerB64 = await res.text()
-      if (answerB64 && answerB64 !== "done") {
-        const answer = JSON.parse(atob(answerB64)) as RTCSessionDescriptionInit
-        await pc.setRemoteDescription(answer)
-      }
+      const { sdp: answer, participantId: pid } = await joinRes.json()
+      setParticipantId(pid)
+      await pc.setRemoteDescription(answer)
 
       setConnectionState("connected")
     } catch (err) {
@@ -106,6 +113,8 @@ export function useWebRTC(): UseWebRTCReturn {
 
     setLocalStream(null)
     setRemoteStream(null)
+    setRoomId(null)
+    setParticipantId(null)
     setConnectionState("idle")
     setIsMicOn(true)
     setIsCameraOn(true)
@@ -134,6 +143,8 @@ export function useWebRTC(): UseWebRTCReturn {
   return {
     localStream,
     remoteStream,
+    roomId,
+    participantId,
     connectionState,
     connect,
     disconnect,
