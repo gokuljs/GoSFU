@@ -1,3 +1,4 @@
+// Package audio defines PCM frame sizes and sample-rate metadata used by the agent audio pipeline.
 package audio
 
 import "time"
