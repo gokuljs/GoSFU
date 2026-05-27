@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/gokuljs/goSfu/pkg/agent/audio"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -56,7 +57,7 @@ func New(ctx context.Context, pc *webrtc.PeerConnection, audioPath string) (*Age
 func (a *Agent) Start() {
 	slog.Info("agent audio starting", "path", a.audioPath)
 	go func() {
-		if err := PlayOGG(a.ctx, a.audioPath, a.track, a.stop); err != nil {
+		if err := audio.PlayOGG(a.ctx, a.audioPath, a.track, a.stop); err != nil {
 			slog.Error("agent audio stopped", "error", err, "path", a.audioPath)
 		}
 	}()
