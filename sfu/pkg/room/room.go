@@ -85,17 +85,16 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 		return nil, err
 	}
 	r.pc = pc
-
+	ag, err := agent.New(r.ctx, pc, r.audioPath)
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		slog.Info("track received",
 			"room", r.Id,
 			"kind", track.Kind().String(),
 			"codec", track.Codec().MimeType,
 		)
-		go r.drainTrack(track)
-	})
+		go ag.HandleInboundTrack(track)
 
-	ag, err := agent.New(r.ctx, pc, r.audioPath)
+	})
 	if err != nil {
 		r.cleanupLocked()
 		return nil, err
