@@ -4,18 +4,29 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
-	"time"
 
-	"github.com/pion/webrtc/v4"
-	"github.com/pion/webrtc/v4/pkg/media"
 	"github.com/pion/webrtc/v4/pkg/media/oggreader"
 )
 
-const oggPageDuration = 20 * time.Millisecond
+// OGGSource reads an Ogg/Opus file, decodes to PCM, pushes frames to out.
+// This proves the outbound pipeline without TTS.
+type OGGSource struct {
+	path string
+	dec  *OpusDecoder
+}
 
-func PlayOGG(ctx context.Context, path string, track *webrtc.TrackLocalStaticSample, stop <-chan struct{}) error {
-	file, err := os.Open(path)
+func NewOGGSource(path string) (*OGGSource, error) {
+	dec, err := NewOpusDecoder(WebrtcSampleRate, ChannelsMono)
+	if err != nil {
+		return nil, err
+	}
+	return &OGGSource{path: path, dec: dec}, nil
+}
+
+func (s *OGGSource) Run(ctx context.Context, out chan<- Frame) error {
+	file, err := os.Open(s.path)
 	if err != nil {
 		return err
 	}
@@ -26,45 +37,41 @@ func PlayOGG(ctx context.Context, path string, track *webrtc.TrackLocalStaticSam
 		return err
 	}
 
-	var lastGranule uint64
-	ticker := time.NewTicker(oggPageDuration)
-	defer ticker.Stop()
+	buffer := NewSampleBuffer(WebrtcSampleRate)
+	slog.Info("ogg source started", "path", s.path)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-stop:
-			return nil
-		case <-ticker.C:
-			pageData, pageHeader, err := ogg.ParseNextPage()
-			if errors.Is(err, io.EOF) {
-				if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
-					return seekErr
-				}
-				ogg, _, err = oggreader.NewWith(file)
-				if err != nil {
-					return err
-				}
-				lastGranule = 0
-				continue
+		default:
+		}
+
+		pageData, _, err := ogg.ParseNextPage()
+		if errors.Is(err, io.EOF) {
+			if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
+				return seekErr
 			}
+			ogg, _, err = oggreader.NewWith(file)
 			if err != nil {
 				return err
 			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
 
-			sampleCount := float64(pageHeader.GranulePosition - lastGranule)
-			lastGranule = pageHeader.GranulePosition
-			sampleDuration := time.Duration((sampleCount / 48000) * float64(time.Second))
-			if sampleDuration <= 0 {
-				sampleDuration = oggPageDuration
-			}
+		pcm, err := s.dec.Decode(pageData)
+		if err != nil {
+			continue
+		}
 
-			if err := track.WriteSample(media.Sample{
-				Data:     pageData,
-				Duration: sampleDuration,
-			}); err != nil {
-				return err
+		for _, frame := range buffer.Push(pcm) {
+			select {
+			case out <- frame:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 		}
 	}
