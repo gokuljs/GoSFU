@@ -26,11 +26,6 @@ func (p *FramePacer) Run(ctx context.Context) {
 
 	acc := NewSampleBuffer(WebrtcSampleRate)
 
-	flush := func() {
-		// SampleBuffer.Push with empty input returns nothing;
-		// we manually emit from acc.pending via Push on next chunk.
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -43,24 +38,20 @@ func (p *FramePacer) Run(ctx context.Context) {
 			if frame.SampleRate == SttSampleRate {
 				frame = Upsample16kTo48k(frame)
 			}
-			for _, f := range acc.Push(frame.Samples) {
+			acc.pending = append(acc.pending, frame.Samples...)
+
+		case <-ticker.C:
+			if len(acc.pending) >= SamplesPerFrame48k {
+				f := Frame{
+					Samples:    make([]int16, SamplesPerFrame48k),
+					SampleRate: WebrtcSampleRate,
+				}
+				copy(f.Samples, acc.pending[:SamplesPerFrame48k])
+				acc.pending = acc.pending[SamplesPerFrame48k:]
 				select {
 				case p.out <- f:
 				case <-ctx.Done():
 					return
-				}
-			}
-			_ = flush
-
-		case <-ticker.C:
-			// Underrun: emit silence so browser clock stays smooth
-			if len(acc.pending) >= SamplesPerFrame48k {
-				for _, f := range acc.Push(nil) {
-					select {
-					case p.out <- f:
-					case <-ctx.Done():
-						return
-					}
 				}
 			} else {
 				select {
