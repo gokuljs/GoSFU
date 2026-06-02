@@ -6,7 +6,7 @@ import (
 	"context"
 
 	"github.com/gokuljs/goSfu/pkg/agent/audio"
-	stt "github.com/gokuljs/goSfu/plugins/sst"
+	"github.com/gokuljs/goSfu/plugins/stt"
 )
 
 func init() {
