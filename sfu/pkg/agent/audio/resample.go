@@ -25,3 +25,26 @@ func Upsample16kTo48k(in Frame) Frame {
 	}
 	return out
 }
+
+// Resample converts mono int16 PCM from one rate to another using linear
+// interpolation. Good enough for voice; swap for a windowed-sinc later if
+// you hear artifacts. Returns the original slice if rates already match.
+func Resample(in []int16, fromRate, toRate int) []int16 {
+	if fromRate == toRate || len(in) == 0 {
+		return in
+	}
+	ratio := float64(fromRate) / float64(toRate)
+	outLen := int(float64(len(in)) / ratio)
+	out := make([]int16, outLen)
+	for i := range out {
+		src := float64(i) * ratio
+		idx := int(src)
+		frac := src - float64(idx)
+		if idx+1 < len(in) {
+			out[i] = int16(float64(in[idx])*(1-frac) + float64(in[idx+1])*frac)
+		} else {
+			out[i] = in[idx]
+		}
+	}
+	return out
+}
