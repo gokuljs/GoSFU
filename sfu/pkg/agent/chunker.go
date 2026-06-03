@@ -86,6 +86,13 @@ func splitSentences(s string, force bool, minChars int) (chunks []string, rest s
 			j++
 		}
 
+		// An ellipsis ("...") is a continuation, not a sentence end — keep
+		// accumulating so "Wait... what?" stays one phrase.
+		if isEllipsis(r, runStart, j) {
+			i = j
+			continue
+		}
+
 		// Let trailing closing quotes/brackets ride along: she said "Go!"
 		end := j
 		for end < n && isClosing(r[end]) {
@@ -157,6 +164,19 @@ var sentenceAbbreviations = map[string]bool{
 }
 
 func isTerminator(r rune) bool { return r == '.' || r == '!' || r == '?' }
+
+// isEllipsis reports whether r[start:end] is a run of two or more periods.
+func isEllipsis(r []rune, start, end int) bool {
+	if end-start < 2 {
+		return false
+	}
+	for k := start; k < end; k++ {
+		if r[k] != '.' {
+			return false
+		}
+	}
+	return true
+}
 
 func isClosing(r rune) bool {
 	switch r {
