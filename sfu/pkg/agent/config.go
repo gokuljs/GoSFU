@@ -3,10 +3,10 @@ package agent
 import (
 	"time"
 
-	vad "github.com/gokuljs/goSfu/plugins/Vad"
 	"github.com/gokuljs/goSfu/plugins/llm"
 	"github.com/gokuljs/goSfu/plugins/stt"
 	"github.com/gokuljs/goSfu/plugins/tts"
+	"github.com/gokuljs/goSfu/plugins/vad"
 )
 
 // Plugins are the swappable capabilities, as interfaces. This is the struct
