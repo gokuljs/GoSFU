@@ -11,8 +11,8 @@ type Transport interface {
 	Inbound() <-chan audio.Frame
 	// Send queues one 48kHz PCM frame to play to the remote peer (agent voice).
 	// Non-blocking: drops if the playout buffer is full.
-	send(frame audio.Frame) error
+	Send(frame audio.Frame) error
 	// Start launches internal media goroutines.
-	start(ctx context.Context) error
-	close() error
+	Start(ctx context.Context) error
+	Close() error
 }
