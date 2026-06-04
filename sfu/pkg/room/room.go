@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/gokuljs/goSfu/pkg/agent"
+	"github.com/gokuljs/goSfu/pkg/agent/transport"
 	"github.com/gokuljs/goSfu/pkg/config"
 	"github.com/gokuljs/goSfu/pkg/sfu"
 	"github.com/google/uuid"
@@ -85,21 +86,35 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 		return nil, err
 	}
 	r.pc = pc
-	ag, err := agent.New(r.ctx, pc, r.audioPath)
+
+	tr, err := transport.NewWebrtc(pc)
+	if err != nil {
+		r.cleanupLocked()
+		return nil, err
+	}
+
+	cfg, err := agent.DefaultAgentConfig()
+	if err != nil {
+		r.cleanupLocked()
+		return nil, err
+	}
+
+	ag := agent.New(r.ctx, tr, cfg)
+	r.agent = ag
+
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		slog.Info("track received",
 			"room", r.Id,
 			"kind", track.Kind().String(),
 			"codec", track.Codec().MimeType,
 		)
-		go ag.HandleInboundTrack(track)
-
+		// Audio only — keep video out of the Opus decoder.
+		if track.Kind() != webrtc.RTPCodecTypeAudio {
+			go r.drainTrack(track)
+			return
+		}
+		tr.HandleRemoteTrack(r.ctx, track)
 	})
-	if err != nil {
-		r.cleanupLocked()
-		return nil, err
-	}
-	r.agent = ag
 
 	var agentStarted sync.Once
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
