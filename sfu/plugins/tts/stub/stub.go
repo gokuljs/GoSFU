@@ -9,7 +9,7 @@ import (
 )
 
 func init() {
-	tts.Register("stub", func() (tts.Provider, error) { return New(), nil })
+	tts.Register("stub", func(_ tts.Options) (tts.Provider, error) { return New(), nil })
 }
 
 type Provider struct{}

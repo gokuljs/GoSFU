@@ -2,8 +2,16 @@ package stt
 
 import "fmt"
 
-// Factory builds a Provider. It reads its own env (API keys etc.).
-type Factory func() (Provider, error)
+// Options are provider settings passed in at build time. APIKey may be empty;
+// the provider factory may fall back to an environment variable.
+type Options struct {
+	APIKey string
+	Model  string
+	Extra  map[string]any
+}
+
+// Factory builds a Provider from explicit options.
+type Factory func(Options) (Provider, error)
 
 var registry = map[string]Factory{}
 
@@ -13,10 +21,10 @@ func Register(name string, f Factory) {
 	registry[name] = f
 }
 
-func Build(name string) (Provider, error) {
+func Build(name string, opts Options) (Provider, error) {
 	f, ok := registry[name]
 	if !ok {
 		return nil, fmt.Errorf("stt: unknown provider %q (did you blank-import it?)", name)
 	}
-	return f()
+	return f(opts)
 }

@@ -19,7 +19,7 @@ import (
 func TestMain(m *testing.M) {
 	for _, path := range []string{
 		"../../../.env", // sfu/.env when cwd is plugins/llm/openai
-		".env",            // sfu/.env when cwd is sfu/
+		".env",          // sfu/.env when cwd is sfu/
 	} {
 		_ = godotenv.Load(path)
 	}
@@ -52,6 +52,9 @@ func TestStreamCompletion_streamsDeltas(t *testing.T) {
 		if req.Model != "gpt-4o-mini" {
 			t.Fatalf("model = %q", req.Model)
 		}
+		if req.Temperature == nil || *req.Temperature != 0.5 {
+			t.Fatalf("temperature = %v, want 0.5", req.Temperature)
+		}
 		if len(req.Messages) != 1 || req.Messages[0].Content != "Hi" {
 			t.Fatalf("messages = %+v", req.Messages)
 		}
@@ -64,7 +67,13 @@ func TestStreamCompletion_streamsDeltas(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := New(Config{APIKey: "test-key", Model: "gpt-4o-mini", BaseURL: srv.URL})
+	temp := 0.5
+	p := New(Config{
+		APIKey:      "test-key",
+		Model:       "gpt-4o-mini",
+		BaseURL:     srv.URL,
+		Temperature: &temp,
+	})
 	ch, err := p.StreamCompletion(context.Background(), []llm.Message{
 		{Role: llm.RoleUser, Content: "Hi"},
 	})
@@ -81,6 +90,48 @@ func TestStreamCompletion_streamsDeltas(t *testing.T) {
 	}
 	if got != "Hello world" {
 		t.Fatalf("reply = %q, want %q", got, "Hello world")
+	}
+}
+
+func TestStreamCompletion_forwardsExtra(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req["max_tokens"] != float64(128) { // JSON numbers decode as float64
+			t.Fatalf("max_tokens = %v, want 128", req["max_tokens"])
+		}
+		if req["top_p"] != 0.9 {
+			t.Fatalf("top_p = %v, want 0.9", req["top_p"])
+		}
+		if req["model"] != "gpt-4o-mini" {
+			t.Fatalf("typed model field should win over extra: %v", req["model"])
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p := New(Config{
+		APIKey:  "test-key",
+		Model:   "gpt-4o-mini",
+		BaseURL: srv.URL,
+		Extra: map[string]any{
+			"max_tokens": 128,
+			"top_p":      0.9,
+			"model":      "should-be-overridden",
+		},
+	})
+	ch, err := p.StreamCompletion(context.Background(), []llm.Message{
+		{Role: llm.RoleUser, Content: "Hi"},
+	})
+	if err != nil {
+		t.Fatalf("StreamCompletion: %v", err)
+	}
+	if _, _, err := collectChunks(ch); err != nil {
+		t.Fatalf("stream: %v", err)
 	}
 }
 
@@ -102,7 +153,7 @@ func TestStreamCompletion_httpError(t *testing.T) {
 	}
 }
 
-func TestRegister_requiresAPIKey(t *testing.T) {
+func TestBuild_requiresAPIKey(t *testing.T) {
 	key := os.Getenv("OPENAI_API_KEY")
 	os.Unsetenv("OPENAI_API_KEY")
 	t.Cleanup(func() {
@@ -111,13 +162,25 @@ func TestRegister_requiresAPIKey(t *testing.T) {
 		}
 	})
 
-	// init() already registered "openai"; factory func reads env at call time.
-	_, err := llm.Build("openai")
+	_, err := llm.Build("openai", llm.Options{Model: "gpt-4o-mini"})
 	if err == nil {
-		t.Fatal("expected error when OPENAI_API_KEY is unset")
+		t.Fatal("expected error when API key is unset")
 	}
-	if !strings.Contains(err.Error(), "OPENAI_API_KEY") {
+	if !strings.Contains(err.Error(), "API key") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestBuild_usesExplicitAPIKey(t *testing.T) {
+	p, err := llm.Build("openai", llm.Options{
+		APIKey: "explicit-key",
+		Model:  "gpt-4o-mini",
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if p.Name() != "openai" {
+		t.Fatalf("Name() = %q", p.Name())
 	}
 }
 
@@ -133,7 +196,11 @@ func TestIntegration_StreamCompletion(t *testing.T) {
 		t.Skip("OPENAI_API_KEY not set; skipping integration test")
 	}
 
-	p, err := llm.Build("openai")
+	temp := 0.2
+	p, err := llm.Build("openai", llm.Options{
+		Model:       "gpt-4o-mini",
+		Temperature: &temp,
+	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

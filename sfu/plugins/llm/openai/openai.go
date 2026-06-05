@@ -16,24 +16,47 @@ import (
 	"github.com/gokuljs/goSfu/plugins/llm"
 )
 
+const defaultModel = "gpt-4o-mini"
+const defaultBaseURL = "https://api.openai.com/v1"
+
 func init() {
-	llm.Register("openai", func() (llm.Provider, error) {
-		key := os.Getenv("OPENAI_API_KEY")
-		if key == "" {
-			return nil, fmt.Errorf("openai: OPENAI_API_KEY is required")
-		}
-		return New(Config{
-			APIKey:  key,
-			Model:   envOr("OPENAI_MODEL", "gpt-4o-mini"),
-			BaseURL: strings.TrimRight(envOr("OPENAI_BASE_URL", "https://api.openai.com/v1"), "/"),
-		}), nil
-	})
+	llm.Register("openai", build)
+}
+
+func build(opts llm.Options) (llm.Provider, error) {
+	key := opts.APIKey
+	if key == "" {
+		key = os.Getenv("OPENAI_API_KEY")
+	}
+	if key == "" {
+		return nil, fmt.Errorf("openai: API key is required (pass Options.APIKey or set OPENAI_API_KEY)")
+	}
+
+	model := opts.Model
+	if model == "" {
+		model = defaultModel
+	}
+
+	baseURL := strings.TrimRight(opts.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
+
+	return New(Config{
+		APIKey:      key,
+		Model:       model,
+		BaseURL:     baseURL,
+		Temperature: opts.Temperature,
+		Extra:       opts.Extra,
+	}), nil
 }
 
 type Config struct {
-	APIKey  string
-	Model   string
-	BaseURL string // for OpenAI-compatible proxies (optional)
+	APIKey      string
+	Model       string
+	BaseURL     string // for OpenAI-compatible proxies (optional)
+	Temperature *float64
+	Extra       map[string]any // forwarded into the chat/completions JSON body
 }
 
 type Provider struct {
@@ -42,6 +65,14 @@ type Provider struct {
 }
 
 func New(cfg Config) *Provider {
+	if cfg.Model == "" {
+		cfg.Model = defaultModel
+	}
+	if strings.TrimRight(cfg.BaseURL, "/") == "" {
+		cfg.BaseURL = defaultBaseURL
+	} else {
+		cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
+	}
 	return &Provider{
 		cfg: cfg,
 		cli: &http.Client{Timeout: 120 * time.Second},
@@ -51,11 +82,7 @@ func New(cfg Config) *Provider {
 func (p *Provider) Name() string { return "openai" }
 
 func (p *Provider) StreamCompletion(ctx context.Context, msgs []llm.Message) (<-chan llm.Chunk, error) {
-	body, err := json.Marshal(chatRequest{
-		Model:    p.cfg.Model,
-		Messages: toOpenAIMessages(msgs),
-		Stream:   true,
-	})
+	body, err := marshalChatRequest(p.cfg, msgs)
 	if err != nil {
 		return nil, err
 	}
@@ -138,9 +165,10 @@ func (p *Provider) StreamCompletion(ctx context.Context, msgs []llm.Message) (<-
 // --- OpenAI API shapes (minimal) ---
 
 type chatRequest struct {
-	Model    string          `json:"model"`
-	Messages []openAIMessage `json:"messages"`
-	Stream   bool            `json:"stream"`
+	Model       string          `json:"model"`
+	Messages    []openAIMessage `json:"messages"`
+	Stream      bool            `json:"stream"`
+	Temperature *float64        `json:"temperature,omitempty"`
 }
 
 type openAIMessage struct {
@@ -164,9 +192,18 @@ func toOpenAIMessages(msgs []llm.Message) []openAIMessage {
 	return out
 }
 
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+// marshalChatRequest builds the API body from typed fields, then merges Extra.
+// Typed fields win over duplicate keys in Extra.
+func marshalChatRequest(cfg Config, msgs []llm.Message) ([]byte, error) {
+	payload := map[string]any{}
+	for k, v := range cfg.Extra {
+		payload[k] = v
 	}
-	return def
+	payload["model"] = cfg.Model
+	payload["messages"] = toOpenAIMessages(msgs)
+	payload["stream"] = true
+	if cfg.Temperature != nil {
+		payload["temperature"] = *cfg.Temperature
+	}
+	return json.Marshal(payload)
 }

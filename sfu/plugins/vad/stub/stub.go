@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	vad.Register("stub", func() (vad.Provider, error) { return New(), nil })
+	vad.Register("stub", func(_ vad.Options) (vad.Provider, error) { return New(), nil })
 }
 
 type Provider struct {

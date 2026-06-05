@@ -18,7 +18,7 @@ import (
 
 // Load merges an optional .env file from the working directory into the
 // process environment. Call once at the very start of main(), before
-// DefaultAgentConfig() or any plugin reads os.Getenv.
+// NewConfig() or any plugin reads os.Getenv for API keys.
 //
 // Missing .env is normal in production and is not treated as an error.
 func Load() {
