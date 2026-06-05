@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	llm.Register("stub", func() (llm.Provider, error) { return New(), nil })
+	llm.Register("stub", func(_ llm.Options) (llm.Provider, error) { return New(), nil })
 }
 
 type Provider struct{}

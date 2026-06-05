@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	stt.Register("stub", func() (stt.Provider, error) { return New(), nil })
+	stt.Register("stub", func(_ stt.Options) (stt.Provider, error) { return New(), nil })
 }
 
 type Provider struct{}

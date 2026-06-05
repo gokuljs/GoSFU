@@ -9,8 +9,8 @@ import (
 	"github.com/gokuljs/goSfu/plugins/vad"
 )
 
-// Plugins are the swappable capabilities, as interfaces. This is the struct
-// your "agentOrchestrator = (stt=deepgram(...), llm=openai(...))" idea maps to.
+// Plugins are the swappable capabilities, as interfaces. Build them via
+// NewConfig(Options) — see options.go for explicit per-agent configuration.
 type Plugins struct {
 	STT stt.Provider
 	LLM llm.Provider
@@ -25,6 +25,8 @@ type Settings struct {
 	MaxChunkChars    int           // sentence-chunk fallback flush size
 	EndOfTurnSilence time.Duration // informational; VAD owns the timer
 	BargeIn          bool
+	// Extra holds orchestrator knobs not yet modeled as typed settings.
+	Extra map[string]any
 }
 
 type Config struct {

@@ -21,7 +21,7 @@ type Agent struct {
 }
 
 // New builds an agent over any transport with a fully-resolved plugin config
-// (see DefaultAgentConfig). The caller owns the transport's underlying
+// (see NewConfig). The caller owns the transport's underlying
 // endpoint (e.g. the PeerConnection) and remote-track delivery.
 func New(ctx context.Context, t transport.Transport, cfg Config) *Agent {
 	ctx, cancel := context.WithCancel(ctx)

@@ -93,7 +93,7 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 		return nil, err
 	}
 
-	cfg, err := agent.DefaultAgentConfig()
+	cfg, err := agent.NewConfig(agent.DefaultOptions())
 	if err != nil {
 		r.cleanupLocked()
 		return nil, err
