@@ -3,6 +3,7 @@ module github.com/gokuljs/goSfu
 go 1.26.1
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/pion/interceptor v0.1.44
