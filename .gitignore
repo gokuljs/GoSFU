@@ -75,3 +75,4 @@ tmp/
 # Generated files
 *.pb.go
 *.gen.go
+.env
