@@ -2,6 +2,7 @@ package audio
 
 import (
 	"context"
+	"log/slog"
 	"time"
 )
 
@@ -35,8 +36,9 @@ func (p *FramePacer) Run(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if frame.SampleRate == SttSampleRate {
-				frame = Upsample16kTo48k(frame)
+			if frame.SampleRate != WebrtcSampleRate && frame.SampleRate != 0 {
+				slog.Warn("pacer got non-48k frame; upstream should have resampled", "rate", frame.SampleRate)
+				continue
 			}
 			acc.pending = append(acc.pending, frame.Samples...)
 

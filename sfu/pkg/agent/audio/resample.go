@@ -1,34 +1,12 @@
 package audio
 
-// Downsample48kTo16k: one 20ms frame at 48kHz → one 20ms frame at 16kHz.
-// Phase 1: simple decimation (every 3rd sample). Upgrade later for quality.
-func Downsample48kTo16k(in Frame) Frame {
-	out := Frame{
-		Samples:    make([]int16, SamplePerFrame16k),
-		SampleRate: SttSampleRate,
-	}
-	for i := range out.Samples {
-		out.Samples[i] = in.Samples[i*3]
-	}
-	return out
-}
-
-func Upsample16kTo48k(in Frame) Frame {
-	out := Frame{
-		Samples:    make([]int16, SamplesPerFrame48k),
-		SampleRate: WebrtcSampleRate,
-	}
-	for i, s := range in.Samples {
-		out.Samples[i*3] = s
-		out.Samples[i*3+1] = s
-		out.Samples[i*3+2] = s
-	}
-	return out
-}
+import "math"
 
 // Resample converts mono int16 PCM from one rate to another using linear
-// interpolation. Good enough for voice; swap for a windowed-sinc later if
-// you hear artifacts. Returns the original slice if rates already match.
+// interpolation. Use this for a single self-contained buffer (e.g. one 20ms
+// frame for VAD/STT). For a continuous stream of chunks at a non-integer
+// ratio, use StreamResampler to avoid per-chunk drift. Returns the input
+// unchanged when the rates already match.
 func Resample(in []int16, fromRate, toRate int) []int16 {
 	if fromRate == toRate || len(in) == 0 {
 		return in
@@ -41,10 +19,57 @@ func Resample(in []int16, fromRate, toRate int) []int16 {
 		idx := int(src)
 		frac := src - float64(idx)
 		if idx+1 < len(in) {
-			out[i] = int16(float64(in[idx])*(1-frac) + float64(in[idx+1])*frac)
+			out[i] = int16(math.Round(float64(in[idx])*(1-frac) + float64(in[idx+1])*frac))
 		} else {
 			out[i] = in[idx]
 		}
 	}
 	return out
+}
+
+// StreamResampler does continuous linear resampling across many chunks,
+// carrying the fractional read position + leftover samples between calls so
+// there is no per-chunk drift or boundary click. Any rate → any rate.
+type StreamResampler struct {
+	from, to int
+	step     float64 // input samples advanced per output sample
+	pos      float64 // fractional read cursor inside buf
+	buf      []int16 // unconsumed input carried to next call
+}
+
+func NewStreamResampler(fromRate, toRate int) *StreamResampler {
+	return &StreamResampler{from: fromRate, to: toRate, step: float64(fromRate) / float64(toRate)}
+}
+
+func (r *StreamResampler) Process(in []int16) []int16 {
+	if r.from == r.to {
+		return in
+	}
+	r.buf = append(r.buf, in...)
+	var out []int16
+	for {
+		idx := int(r.pos)
+		if idx+1 >= len(r.buf) {
+			break
+		}
+		frac := r.pos - float64(idx)
+		s := float64(r.buf[idx])*(1-frac) + float64(r.buf[idx+1])*frac
+		out = append(out, int16(math.Round(s)))
+		r.pos += r.step
+	}
+	if consumed := int(r.pos); consumed > 0 {
+		r.buf = append(r.buf[:0], r.buf[consumed:]...)
+		r.pos -= float64(consumed)
+	}
+	return out
+}
+
+func (r *StreamResampler) Flush() []int16 {
+	if r.from == r.to || len(r.buf) == 0 {
+		return nil
+	}
+	last := r.buf[len(r.buf)-1]
+	r.buf = r.buf[:0]
+	r.pos = 0
+	return []int16{last}
 }
