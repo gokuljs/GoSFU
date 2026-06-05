@@ -2,6 +2,31 @@ package audio
 
 import "math"
 
+// Resample converts mono int16 PCM from one rate to another using linear
+// interpolation. Use this for a single self-contained buffer (e.g. one 20ms
+// frame for VAD/STT). For a continuous stream of chunks at a non-integer
+// ratio, use StreamResampler to avoid per-chunk drift. Returns the input
+// unchanged when the rates already match.
+func Resample(in []int16, fromRate, toRate int) []int16 {
+	if fromRate == toRate || len(in) == 0 {
+		return in
+	}
+	ratio := float64(fromRate) / float64(toRate)
+	outLen := int(float64(len(in)) / ratio)
+	out := make([]int16, outLen)
+	for i := range out {
+		src := float64(i) * ratio
+		idx := int(src)
+		frac := src - float64(idx)
+		if idx+1 < len(in) {
+			out[i] = int16(math.Round(float64(in[idx])*(1-frac) + float64(in[idx+1])*frac))
+		} else {
+			out[i] = in[idx]
+		}
+	}
+	return out
+}
+
 // StreamResampler does continuous linear resampling across many chunks,
 // carrying the fractional read position + leftover samples between calls so
 // there is no per-chunk drift or boundary click. Any rate → any rate.
