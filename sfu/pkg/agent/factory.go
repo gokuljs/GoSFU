@@ -14,6 +14,7 @@ import (
 	//	_ "github.com/gokuljs/goSfu/plugins/llm/openai"
 	//	_ "github.com/gokuljs/goSfu/plugins/tts/rime"
 	//	_ "github.com/gokuljs/goSfu/plugins/vad/silero"
+	_ "github.com/gokuljs/goSfu/plugins/llm/openai"
 	_ "github.com/gokuljs/goSfu/plugins/llm/stub"
 	_ "github.com/gokuljs/goSfu/plugins/stt/stub"
 	_ "github.com/gokuljs/goSfu/plugins/tts/stub"
