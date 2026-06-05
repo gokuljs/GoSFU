@@ -93,7 +93,15 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 		return nil, err
 	}
 
-	cfg, err := agent.NewConfig(agent.DefaultOptions())
+	// Provider wiring lives in code, not env. Only secrets (API keys) and
+	// machine-specific paths come from the environment, resolved inside each
+	// plugin's factory.
+	cfg, err := agent.NewConfig(agent.Options{
+		LLMProvider: "openai",
+		STTProvider: "deepgram",
+		TTSProvider: "rime",
+		VADProvider: "silero",
+	})
 	if err != nil {
 		r.cleanupLocked()
 		return nil, err
