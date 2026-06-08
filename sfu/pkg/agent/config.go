@@ -3,6 +3,7 @@ package agent
 import (
 	"time"
 
+	"github.com/gokuljs/goSfu/pkg/transcript"
 	"github.com/gokuljs/goSfu/plugins/llm"
 	"github.com/gokuljs/goSfu/plugins/stt"
 	"github.com/gokuljs/goSfu/plugins/tts"
@@ -30,9 +31,10 @@ type Settings struct {
 }
 
 type Config struct {
-	Plugins  Plugins
-	Settings Settings
-	RoomID   string
+	Plugins             Plugins
+	Settings            Settings
+	RoomID              string
+	TranscriptPublisher transcript.Publisher
 }
 
 func DefaultSettings() Settings {

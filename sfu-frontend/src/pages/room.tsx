@@ -15,10 +15,10 @@ import type {
   PeerConnectionStateValue,
   SelectedDevices,
 } from "@/hooks/use-webrtc"
+import type { TranscriptMessage } from "@/hooks/use-transcript"
 import type {
   DebugConnectionState,
   DebugEvent,
-  TranscriptMessage,
 } from "@/hooks/use-session-debug"
 
 interface RoomPageProps {

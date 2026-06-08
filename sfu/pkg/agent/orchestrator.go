@@ -9,6 +9,7 @@ import (
 	"github.com/gokuljs/goSfu/pkg/agent/audio"
 	"github.com/gokuljs/goSfu/pkg/agent/transport"
 	"github.com/gokuljs/goSfu/pkg/logger"
+	"github.com/gokuljs/goSfu/pkg/transcript"
 	"github.com/gokuljs/goSfu/plugins/llm"
 	"github.com/gokuljs/goSfu/plugins/stt"
 	"github.com/gokuljs/goSfu/plugins/vad"
@@ -73,6 +74,18 @@ func NewOrchestrator(cfg Config, t transport.Transport) *Orchestrator {
 }
 
 func (o *Orchestrator) room() string { return o.cfg.RoomID }
+
+func (o *Orchestrator) publishTranscript(speaker, text string, final bool, turn int) {
+	if o.cfg.TranscriptPublisher == nil {
+		return
+	}
+	o.cfg.TranscriptPublisher.Publish(o.room(), transcript.Update{
+		Speaker: speaker,
+		Text:    text,
+		Final:   final,
+		Turn:    turn,
+	})
+}
 
 // Run is the conversation loop. It owns one STT session and one VAD instance
 // for the lifetime of the call and sequences turns: listen → respond → listen.
@@ -213,6 +226,11 @@ func (o *Orchestrator) onTranscript(ctx context.Context, res stt.Result) {
 			"text_len", len(text),
 			"text_preview", logger.Preview(text, 80),
 		)
+		display := text
+		if o.pending.Len() > 0 {
+			display = strings.TrimSpace(o.pending.String() + " " + text)
+		}
+		o.publishTranscript(transcript.SpeakerUser, display, false, o.turn+1)
 		return
 	}
 	logger.Pipeline(slog.LevelDebug, logger.EventSTTResult,
@@ -255,6 +273,7 @@ func (o *Orchestrator) maybeEndTurn(ctx context.Context) {
 		"room", o.room(), "turn", o.turn,
 		"text", text, "text_len", len(text),
 	)
+	o.publishTranscript(transcript.SpeakerUser, text, true, o.turn)
 	o.startResponse(ctx, text)
 }
 
@@ -294,6 +313,7 @@ func (o *Orchestrator) startGreeting(ctx context.Context, text string) {
 		"room", o.room(), "turn", 0,
 		"text", text,
 	)
+	o.publishTranscript(transcript.SpeakerAgent, text, true, 0)
 
 	respCtx, cancel := context.WithCancel(ctx)
 	done := make(chan responseResult, 1)
@@ -361,6 +381,9 @@ func (o *Orchestrator) runResponse(ctx context.Context, turn int, started time.T
 			)
 		}
 		full.WriteString(chunk.Delta)
+		if chunk.Delta != "" {
+			o.publishTranscript(transcript.SpeakerAgent, full.String(), false, turn)
+		}
 		// Speak each completed sentence immediately so audio starts before the
 		// LLM has finished generating the whole reply.
 		for _, sentence := range chunker.push(chunk.Delta) {
@@ -386,6 +409,9 @@ func (o *Orchestrator) runResponse(ctx context.Context, turn int, started time.T
 		"text_len", full.Len(),
 		"duration_ms", time.Since(llmStart).Milliseconds(),
 	)
+	if full.Len() > 0 {
+		o.publishTranscript(transcript.SpeakerAgent, full.String(), true, turn)
+	}
 
 	// Half-duplex: only hand the turn back to listening once the user has
 	// actually heard the whole reply, not just when it was queued. speak()
@@ -509,6 +535,9 @@ func (o *Orchestrator) onResponseDone(res responseResult) {
 			"Interrupted response worker stopped",
 			"room", o.room(), "turn", res.turn,
 		)
+		if text := strings.TrimSpace(res.assistantText); text != "" {
+			o.publishTranscript(transcript.SpeakerAgent, text, true, res.turn)
+		}
 	}
 	if res.completed && res.turn == o.turn && strings.TrimSpace(res.assistantText) != "" {
 		o.history = append(o.history, llm.Message{Role: llm.RoleAssistant, Content: res.assistantText})

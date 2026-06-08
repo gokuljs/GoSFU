@@ -10,6 +10,7 @@ import (
 	"github.com/gokuljs/goSfu/pkg/agent/transport"
 	"github.com/gokuljs/goSfu/pkg/config"
 	"github.com/gokuljs/goSfu/pkg/sessiondebug"
+	"github.com/gokuljs/goSfu/pkg/transcript"
 	"github.com/gokuljs/goSfu/pkg/sfu"
 	"github.com/google/uuid"
 	"github.com/pion/webrtc/v4"
@@ -46,6 +47,7 @@ type Room struct {
 	pc           *webrtc.PeerConnection
 	agent        *agent.Agent
 	debug        *sessiondebug.Hub
+	transcripts  *transcript.Hub
 }
 type JoinResult struct {
 	Sdp           webrtc.SessionDescription `json:"sdp"`
@@ -53,7 +55,7 @@ type JoinResult struct {
 	RoomId        string                    `json:"roomId"`
 }
 
-func NewRoom(id string, debug *sessiondebug.Hub, onClose func(string)) *Room {
+func NewRoom(id string, debug *sessiondebug.Hub, transcripts *transcript.Hub, onClose func(string)) *Room {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Room{
 		Id:           id,
@@ -64,6 +66,7 @@ func NewRoom(id string, debug *sessiondebug.Hub, onClose func(string)) *Room {
 		cancel:       cancel,
 		onClose:      onClose,
 		debug:        debug,
+		transcripts:  transcripts,
 	}
 }
 
@@ -113,6 +116,7 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 		return nil, err
 	}
 	cfg.RoomID = r.Id
+	cfg.TranscriptPublisher = r.transcripts
 
 	ag := agent.New(r.ctx, tr, cfg)
 	r.agent = ag

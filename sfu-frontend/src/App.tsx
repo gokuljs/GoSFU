@@ -3,6 +3,7 @@ import { LandingPage } from "@/pages/landing"
 import { RoomPage } from "@/pages/room"
 import { SFU_URL, useWebRTC } from "@/hooks/use-webrtc"
 import { useSessionDebug } from "@/hooks/use-session-debug"
+import { useTranscript } from "@/hooks/use-transcript"
 
 type View = "landing" | "room"
 
@@ -26,6 +27,7 @@ export function App() {
     isCameraOn,
   } = useWebRTC()
   const debug = useSessionDebug(roomId, SFU_URL)
+  const transcript = useTranscript(roomId, SFU_URL)
   const { addLocalEvent } = debug
 
   const handleConnect = useCallback(async () => {
@@ -106,7 +108,7 @@ export function App() {
           devices={devices}
           selectedDevices={selectedDevices}
           debugEvents={debug.events}
-          transcript={debug.transcript}
+          transcript={transcript.transcript}
           onClearEvents={debug.clearEvents}
           isMicOn={isMicOn}
           isCameraOn={isCameraOn}

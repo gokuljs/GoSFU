@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 const MAX_DEBUG_EVENTS = 600
 
@@ -23,18 +23,8 @@ export interface DebugEvent {
   attrs?: Record<string, unknown>
 }
 
-export interface TranscriptMessage {
-  id: string
-  speaker: "user" | "agent"
-  text: string
-  ts: string
-  turn?: number
-  interim: boolean
-}
-
 export interface UseSessionDebugReturn {
   events: DebugEvent[]
-  transcript: TranscriptMessage[]
   status: DebugConnectionState
   addLocalEvent: (
     type: string,
@@ -56,61 +46,6 @@ function websocketUrl(baseUrl: string, roomId: string) {
 function eventId() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID()
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
-function stringAttr(event: DebugEvent, key: string) {
-  const value = event.attrs?.[key]
-  return typeof value === "string" ? value.trim() : ""
-}
-
-function upsertTranscript(
-  messages: Map<string, TranscriptMessage>,
-  event: DebugEvent,
-  speaker: TranscriptMessage["speaker"],
-  text: string,
-  interim: boolean
-) {
-  if (!text) return
-  const turn = event.turn ?? Number(event.attrs?.turn)
-  const id = `${speaker}-${turn || event.id}`
-  messages.set(id, {
-    id,
-    speaker,
-    text,
-    ts: event.ts,
-    turn: Number.isFinite(turn) ? turn : undefined,
-    interim,
-  })
-}
-
-function deriveTranscript(events: DebugEvent[]) {
-  const messages = new Map<string, TranscriptMessage>()
-
-  for (const event of events) {
-    if (event.type === "pipeline.transcript.interim") {
-      upsertTranscript(messages, event, "user", stringAttr(event, "text"), true)
-      continue
-    }
-    if (event.type === "pipeline.turn.ready") {
-      upsertTranscript(messages, event, "user", stringAttr(event, "text"), false)
-      continue
-    }
-    if (event.type === "pipeline.stt.result") {
-      upsertTranscript(messages, event, "user", stringAttr(event, "text"), false)
-      continue
-    }
-    if (
-      event.type === "pipeline.llm.complete" ||
-      event.type === "pipeline.agent.response_done" ||
-      event.type === "pipeline.agent.response_started"
-    ) {
-      upsertTranscript(messages, event, "agent", stringAttr(event, "text"), false)
-    }
-  }
-
-  return Array.from(messages.values()).sort(
-    (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
-  )
 }
 
 export function useSessionDebug(
@@ -192,11 +127,8 @@ export function useSessionDebug(
     }
   }, [addEvent, addLocalEvent, roomId, sfuUrl])
 
-  const transcript = useMemo(() => deriveTranscript(events), [events])
-
   return {
     events,
-    transcript,
     status,
     addLocalEvent,
     clearEvents: useCallback(() => setEvents([]), []),
