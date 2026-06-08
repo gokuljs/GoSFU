@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/gokuljs/goSfu/pkg/agent"
 	"github.com/gokuljs/goSfu/pkg/agent/transport"
 	"github.com/gokuljs/goSfu/pkg/config"
-	"github.com/gokuljs/goSfu/pkg/sessiondebug"
-	"github.com/gokuljs/goSfu/pkg/transcript"
+	"github.com/gokuljs/goSfu/pkg/roomstream"
 	"github.com/gokuljs/goSfu/pkg/sfu"
 	"github.com/google/uuid"
 	"github.com/pion/webrtc/v4"
@@ -46,8 +46,7 @@ type Room struct {
 	cancel       context.CancelFunc
 	pc           *webrtc.PeerConnection
 	agent        *agent.Agent
-	debug        *sessiondebug.Hub
-	transcripts  *transcript.Hub
+	stream       *roomstream.Hub
 }
 type JoinResult struct {
 	Sdp           webrtc.SessionDescription `json:"sdp"`
@@ -55,22 +54,18 @@ type JoinResult struct {
 	RoomId        string                    `json:"roomId"`
 }
 
-func NewRoom(id string, debug *sessiondebug.Hub, transcripts *transcript.Hub, onClose func(string)) *Room {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewRoom(id string, stream *roomstream.Hub, onClose func(string)) *Room {
 	return &Room{
 		Id:           id,
 		State:        StateWaiting,
 		Participants: []Participant{},
 		audioPath:    config.DEFAULT_AUDIO_SAMPLE_FILE,
-		ctx:          ctx,
-		cancel:       cancel,
 		onClose:      onClose,
-		debug:        debug,
-		transcripts:  transcripts,
+		stream:       stream,
 	}
 }
 
-func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) {
+func (r *Room) HandleJoin(offer webrtc.SessionDescription, systemPrompt string) (*JoinResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// check if the room is already full or already closed
@@ -81,12 +76,12 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 		return nil, ErrRoomFull
 	}
 	participantId := uuid.New().String()
-	r.Participants = append(r.Participants, Participant{
+	r.Participants = []Participant{{
 		Id:     participantId,
 		Name:   "",
 		Active: true,
-	})
-	r.debug.PublishEvent(r.Id, "session.participant.joined", "info", "Participant joined", map[string]any{
+	}}
+	r.stream.PublishEvent(r.Id, "session.participant.joined", "info", "Participant joined", map[string]any{
 		"participant_id": participantId,
 	})
 
@@ -98,27 +93,37 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 
 	tr, err := transport.NewWebrtc(pc, r.Id)
 	if err != nil {
-		r.cleanupLocked()
+		r.stopSessionLocked()
 		return nil, err
 	}
 
 	// Provider wiring lives in code, not env. Only secrets (API keys) and
 	// machine-specific paths come from the environment, resolved inside each
 	// plugin's factory.
+	settings := agent.DefaultSettings()
+	if prompt := strings.TrimSpace(systemPrompt); prompt != "" {
+		settings.SystemPrompt = prompt
+	}
 	cfg, err := agent.NewConfig(agent.Options{
 		LLMProvider: "openai",
 		STTProvider: "deepgram",
 		TTSProvider: "rime",
 		VADProvider: "silero",
+		Settings:    settings,
 	})
 	if err != nil {
-		r.cleanupLocked()
+		r.stopSessionLocked()
 		return nil, err
 	}
 	cfg.RoomID = r.Id
-	cfg.TranscriptPublisher = r.transcripts
+	cfg.TranscriptPublisher = r.stream
+	cfg.MetricsPublisher = r.stream
 
-	ag := agent.New(r.ctx, tr, cfg)
+	sessionCtx, cancel := context.WithCancel(context.Background())
+	r.ctx = sessionCtx
+	r.cancel = cancel
+
+	ag := agent.New(sessionCtx, tr, cfg)
 	r.agent = ag
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
@@ -127,23 +132,23 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 			"kind", track.Kind().String(),
 			"codec", track.Codec().MimeType,
 		)
-		r.debug.PublishEvent(r.Id, "media.track.started", "info", "Track started", map[string]any{
+		r.stream.PublishEvent(r.Id, "media.track.started", "info", "Track started", map[string]any{
 			"kind":       track.Kind().String(),
 			"codec":      track.Codec().MimeType,
 			"clock_rate": track.Codec().ClockRate,
 		})
 		// Audio only — keep video out of the Opus decoder.
 		if track.Kind() != webrtc.RTPCodecTypeAudio {
-			go r.drainTrack(track)
+			go r.drainTrack(sessionCtx, track)
 			return
 		}
-		tr.HandleRemoteTrack(r.ctx, track)
+		tr.HandleRemoteTrack(sessionCtx, track)
 	})
 
 	var agentStarted sync.Once
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		slog.Info("pc state", "room", r.Id, "state", state.String())
-		r.debug.PublishEvent(r.Id, "transport.peer_connection.state", "info", "Peer connection state changed", map[string]any{
+		r.stream.PublishEvent(r.Id, "transport.peer_connection.state", "info", "Peer connection state changed", map[string]any{
 			"state": state.String(),
 		})
 		if state == webrtc.PeerConnectionStateConnected {
@@ -152,32 +157,32 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 		if state == webrtc.PeerConnectionStateFailed ||
 			state == webrtc.PeerConnectionStateClosed ||
 			state == webrtc.PeerConnectionStateDisconnected {
-			r.Close()
+			go r.StopSession()
 		}
 	})
 
 	if err := pc.SetRemoteDescription(offer); err != nil {
-		r.cleanupLocked()
+		r.stopSessionLocked()
 		return nil, err
 	}
 
 	// Job 7: create and set answer which need to be send back to browser and stuff
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
-		r.cleanupLocked()
+		r.stopSessionLocked()
 		return nil, err
 	}
 
 	gatherComplete := webrtc.GatheringCompletePromise(pc)
 	if err := pc.SetLocalDescription(answer); err != nil {
-		r.cleanupLocked()
+		r.stopSessionLocked()
 		return nil, err
 	}
 	// basically waiting for all ice setup done
 	<-gatherComplete
 	r.State = StateActive
 	slog.Info("room active", "room", r.Id, "participant", participantId)
-	r.debug.PublishEvent(r.Id, "session.room.active", "info", "Room active", map[string]any{
+	r.stream.PublishEvent(r.Id, "session.room.active", "info", "Room active", map[string]any{
 		"participant_id": participantId,
 	})
 	return &JoinResult{
@@ -187,17 +192,17 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 	}, nil
 }
 
-func (r *Room) drainTrack(track *webrtc.TrackRemote) {
+func (r *Room) drainTrack(ctx context.Context, track *webrtc.TrackRemote) {
 	// 1500 is MTU size in general
 	buf := make([]byte, 1500)
 	for {
 		select {
-		case <-r.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
 		if _, _, err := track.Read(buf); err != nil {
-			r.debug.PublishEvent(r.Id, "media.track.stopped", "info", "Track stopped", map[string]any{
+			r.stream.PublishEvent(r.Id, "media.track.stopped", "info", "Track stopped", map[string]any{
 				"kind":  track.Kind().String(),
 				"codec": track.Codec().MimeType,
 				"error": err.Error(),
@@ -207,6 +212,15 @@ func (r *Room) drainTrack(track *webrtc.TrackRemote) {
 	}
 }
 
+func (r *Room) StopSession() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.State == StateClosed {
+		return
+	}
+	r.stopSessionLocked()
+}
+
 func (r *Room) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -214,15 +228,22 @@ func (r *Room) Close() {
 		return
 	}
 	id := r.Id
-	r.cleanupLocked()
+	r.State = StateClosed
+	r.stopSessionLocked()
+	slog.Info("room closed", "room", r.Id)
+	r.stream.PublishEvent(r.Id, "session.room.closed", "info", "Room closed", nil)
 	if r.onClose != nil {
 		r.onClose(id)
 	}
 }
 
-func (r *Room) cleanupLocked() {
-	r.State = StateClosed
-	r.cancel()
+func (r *Room) stopSessionLocked() {
+	hadSession := r.cancel != nil || r.agent != nil || r.pc != nil
+	if r.cancel != nil {
+		r.cancel()
+		r.cancel = nil
+	}
+	r.ctx = nil
 	if r.agent != nil {
 		r.agent.Stop()
 		r.agent = nil
@@ -232,8 +253,16 @@ func (r *Room) cleanupLocked() {
 		r.pc = nil
 	}
 	for i := range r.Participants {
+		if r.Participants[i].Active {
+			hadSession = true
+		}
 		r.Participants[i].Active = false
 	}
-	slog.Info("room closed", "room", r.Id)
-	r.debug.PublishEvent(r.Id, "session.room.closed", "info", "Room closed", nil)
+	if r.State != StateClosed {
+		r.State = StateWaiting
+		if hadSession {
+			slog.Info("room session stopped", "room", r.Id)
+			r.stream.PublishEvent(r.Id, "session.room.waiting", "info", "Room waiting for session", nil)
+		}
+	}
 }

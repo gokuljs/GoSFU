@@ -1,4 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, type ReactNode } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react"
 import {
   BrowserRouter,
   Navigate,
@@ -10,8 +17,8 @@ import {
 import { LandingPage } from "@/pages/landing"
 import { RoomPage } from "@/pages/room"
 import { SFU_URL, useWebRTC } from "@/hooks/use-webrtc"
-import { useSessionDebug } from "@/hooks/use-session-debug"
-import { useTranscript } from "@/hooks/use-transcript"
+import { useRoomStream } from "@/hooks/use-room-stream"
+import { DEFAULT_SYSTEM_PROMPT } from "@/lib/agent-defaults"
 
 type WebRTCContextValue = ReturnType<typeof useWebRTC>
 
@@ -53,32 +60,49 @@ function RoomRoute() {
     connectionState,
     peerConnectionState,
     iceConnectionState,
-    devices,
     selectedDevices,
     connect,
     disconnect,
+    stopSession,
+    deleteRoom,
     toggleMic,
     toggleCamera,
     isMicOn,
     isCameraOn,
   } = useWebRTCContext()
   const activeRoomId = roomId ?? routeRoomId ?? null
-  const debug = useSessionDebug(activeRoomId, SFU_URL)
-  const transcript = useTranscript(activeRoomId, SFU_URL)
-  const { addLocalEvent } = debug
+  const stream = useRoomStream(activeRoomId, SFU_URL)
+  const { addLocalEvent } = stream
+  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
 
   useEffect(() => {
-    if (!routeRoomId) return
-    void connect(routeRoomId)
+    setSystemPrompt(DEFAULT_SYSTEM_PROMPT)
     return () => {
       disconnect()
     }
-  }, [routeRoomId, connect, disconnect])
+  }, [routeRoomId, disconnect])
 
-  const handleDisconnect = useCallback(() => {
-    disconnect()
+  const handleStartSession = useCallback(() => {
+    if (!routeRoomId) return
+    void connect(routeRoomId, systemPrompt)
+  }, [connect, routeRoomId, systemPrompt])
+
+  const handleStopSession = useCallback(() => {
+    if (!routeRoomId) return
+    void stopSession(routeRoomId)
+  }, [routeRoomId, stopSession])
+
+  const handleDisconnect = useCallback(async () => {
+    if (routeRoomId) {
+      await deleteRoom(routeRoomId)
+    } else {
+      disconnect()
+    }
     navigate("/")
-  }, [disconnect, navigate])
+  }, [deleteRoom, disconnect, navigate, routeRoomId])
+
+  const canEditPrompt =
+    connectionState === "idle" || connectionState === "failed"
 
   useEffect(() => {
     addLocalEvent("client.connection.state", "Client connection state", {
@@ -128,18 +152,23 @@ function RoomRoute() {
       participantId={participantId}
       connectionState={connectionState}
       peerConnectionState={peerConnectionState}
-      iceConnectionState={iceConnectionState}
-      debugStatus={debug.status}
-      devices={devices}
+      streamStatus={stream.status}
       selectedDevices={selectedDevices}
-      debugEvents={debug.events}
-      transcript={transcript.transcript}
-      onClearEvents={debug.clearEvents}
+      debugEvents={stream.debugEvents}
+      transcript={stream.transcript}
+      metrics={stream.metrics}
+      latestByStage={stream.latestByStage}
+      onClearEvents={stream.clearEvents}
       isMicOn={isMicOn}
       isCameraOn={isCameraOn}
       onToggleMic={toggleMic}
       onToggleCamera={toggleCamera}
       onDisconnect={handleDisconnect}
+      systemPrompt={systemPrompt}
+      onSystemPromptChange={setSystemPrompt}
+      onStartSession={handleStartSession}
+      onStopSession={handleStopSession}
+      canEditPrompt={canEditPrompt}
     />
   )
 }

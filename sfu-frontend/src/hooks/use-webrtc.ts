@@ -24,8 +24,10 @@ interface UseWebRTCReturn {
   devices: MediaDeviceInfo[]
   selectedDevices: SelectedDevices
   createRoom: () => Promise<string>
-  connect: (roomId: string) => Promise<void>
+  connect: (roomId: string, systemPrompt?: string) => Promise<void>
   disconnect: () => void
+  stopSession: (roomId?: string) => Promise<void>
+  deleteRoom: (roomId?: string) => Promise<void>
   toggleMic: () => void
   toggleCamera: () => void
   isMicOn: boolean
@@ -128,7 +130,7 @@ export function useWebRTC(): UseWebRTCReturn {
   }, [])
 
   const connect = useCallback(
-    async (targetRoomId: string) => {
+    async (targetRoomId: string, systemPrompt?: string) => {
       const generation = ++connectGenerationRef.current
       disconnect()
       connectGenerationRef.current = generation
@@ -160,9 +162,11 @@ export function useWebRTC(): UseWebRTCReturn {
 
         pc.ontrack = (event) => {
           remote.addTrack(event.track)
+          setRemoteStream(new MediaStream(remote.getTracks()))
         }
 
         pc.onconnectionstatechange = () => {
+          if (connectGenerationRef.current !== generation) return
           setPeerConnectionState(pc.connectionState)
           if (pc.connectionState === "connected") {
             setConnectionState("connected")
@@ -176,6 +180,7 @@ export function useWebRTC(): UseWebRTCReturn {
         }
 
         pc.oniceconnectionstatechange = () => {
+          if (connectGenerationRef.current !== generation) return
           setIceConnectionState(pc.iceConnectionState)
         }
 
@@ -194,7 +199,10 @@ export function useWebRTC(): UseWebRTCReturn {
         const joinRes = await fetch(`${SFU_URL}/room/${targetRoomId}/join`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sdp: pc.localDescription }),
+          body: JSON.stringify({
+            sdp: pc.localDescription,
+            systemPrompt: systemPrompt?.trim() || undefined,
+          }),
         })
         if (!joinRes.ok) {
           throw new Error(`Join failed: ${joinRes.status}`)
@@ -220,6 +228,36 @@ export function useWebRTC(): UseWebRTCReturn {
       }
     },
     [disconnect, refreshDevices]
+  )
+
+  const stopSession = useCallback(
+    async (targetRoomId = roomId ?? undefined) => {
+      disconnect()
+      if (!targetRoomId) return
+
+      const stopRes = await fetch(`${SFU_URL}/room/${targetRoomId}/session/stop`, {
+        method: "POST",
+      })
+      if (!stopRes.ok && stopRes.status !== 404) {
+        throw new Error(`Stop session failed: ${stopRes.status}`)
+      }
+    },
+    [disconnect, roomId]
+  )
+
+  const deleteRoom = useCallback(
+    async (targetRoomId = roomId ?? undefined) => {
+      disconnect()
+      if (!targetRoomId) return
+
+      const deleteRes = await fetch(`${SFU_URL}/room/${targetRoomId}`, {
+        method: "DELETE",
+      })
+      if (!deleteRes.ok && deleteRes.status !== 404) {
+        throw new Error(`Delete room failed: ${deleteRes.status}`)
+      }
+    },
+    [disconnect, roomId]
   )
 
   const toggleMic = useCallback(() => {
@@ -271,6 +309,8 @@ export function useWebRTC(): UseWebRTCReturn {
     createRoom,
     connect,
     disconnect,
+    stopSession,
+    deleteRoom,
     toggleMic,
     toggleCamera,
     isMicOn,

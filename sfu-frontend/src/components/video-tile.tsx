@@ -10,6 +10,7 @@ interface VideoTileProps {
   muted?: boolean
   label: string
   type?: TileType
+  compact?: boolean
 }
 
 export function VideoTile({
@@ -17,6 +18,7 @@ export function VideoTile({
   muted = false,
   label,
   type = "human",
+  compact = false,
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -82,7 +84,7 @@ export function VideoTile({
   const hasVideo = stream && stream.getVideoTracks().length > 0 && videoEnabled
 
   return (
-    <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden border border-[#1a1a1a] bg-[#050505]">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden border border-[#1a1a1a] bg-[#050505]">
       {type === "agent" && (
         <audio ref={audioRef} autoPlay playsInline className="hidden" />
       )}
@@ -100,12 +102,14 @@ export function VideoTile({
           <img
             src="/avatar.png"
             alt="You"
-            className="h-32 w-32 rounded-full object-cover opacity-70 sm:h-36 sm:w-36"
+            className={`${compact ? "h-20 w-20" : "h-32 w-32 sm:h-36 sm:w-36"} rounded-full object-cover opacity-70`}
           />
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-5">
-          <div className="h-36 w-36 overflow-hidden rounded-full sm:h-40 sm:w-40 md:h-44 md:w-44">
+        <div className={`flex flex-col items-center ${compact ? "gap-2" : "gap-5"}`}>
+          <div
+            className={`${compact ? "h-20 w-20" : "h-36 w-36 sm:h-40 sm:w-40 md:h-44 md:w-44"} overflow-hidden rounded-full`}
+          >
             <Orb
               colors={["#00d4aa", "#00b894"]}
               agentState={agentState}
@@ -116,7 +120,7 @@ export function VideoTile({
           </div>
           <ShimmeringText
             text={stateLabel}
-            className="text-[10px] font-medium tracking-wider uppercase"
+            className={`${compact ? "text-[9px]" : "text-[10px]"} font-medium tracking-wider uppercase`}
             color="rgba(255, 255, 255, 0.3)"
             shimmerColor="rgba(0, 212, 170, 0.8)"
             duration={2}

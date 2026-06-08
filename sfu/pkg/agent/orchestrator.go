@@ -9,6 +9,7 @@ import (
 	"github.com/gokuljs/goSfu/pkg/agent/audio"
 	"github.com/gokuljs/goSfu/pkg/agent/transport"
 	"github.com/gokuljs/goSfu/pkg/logger"
+	"github.com/gokuljs/goSfu/pkg/roomstream"
 	"github.com/gokuljs/goSfu/pkg/transcript"
 	"github.com/gokuljs/goSfu/plugins/llm"
 	"github.com/gokuljs/goSfu/plugins/stt"
@@ -56,6 +57,13 @@ type Orchestrator struct {
 
 	sttFrames       uint64
 	nextSTTLevelLog time.Time
+	nextVADLevelLog time.Time
+
+	speechStartAt      time.Time
+	speechEndAt        time.Time
+	firstTranscriptAt  time.Time
+	firstTranscriptHit bool
+	utteranceTurn      int
 }
 
 type responseResult struct {
@@ -70,7 +78,33 @@ func NewOrchestrator(cfg Config, t transport.Transport) *Orchestrator {
 	if p := strings.TrimSpace(cfg.Settings.SystemPrompt); p != "" {
 		o.history = append(o.history, llm.Message{Role: llm.RoleSystem, Content: p})
 	}
+	t.SetOnPlayoutStarted(func(turn int, bufferedMs int, elapsedMs int64) {
+		o.emitMetric(turn, "tts", "first_playable_ms", "ms", float64(elapsedMs), map[string]any{
+			"buffered_ms": bufferedMs,
+		})
+	})
 	return o
+}
+
+func (o *Orchestrator) emitMetric(turn int, stage, name, unit string, value float64, meta map[string]any) {
+	if o.cfg.MetricsPublisher == nil {
+		return
+	}
+	o.cfg.MetricsPublisher.PublishMetric(o.room(), roomstream.MetricUpdate{
+		Turn:  turn,
+		Stage: stage,
+		Name:  name,
+		Value: value,
+		Unit:  unit,
+		Meta:  meta,
+	})
+}
+
+func (o *Orchestrator) resetUtteranceTiming() {
+	o.speechStartAt = time.Time{}
+	o.speechEndAt = time.Time{}
+	o.firstTranscriptAt = time.Time{}
+	o.firstTranscriptHit = false
 }
 
 func (o *Orchestrator) room() string { return o.cfg.RoomID }
@@ -144,29 +178,48 @@ func (o *Orchestrator) onAudio(ctx context.Context, sttSess stt.Session, frame a
 		Samples:    audio.Resample(frame.Samples, frame.SampleRate, vadRate),
 		SampleRate: vadRate,
 	}
-	if events, err := o.cfg.Plugins.VAD.Analyze(ctx, vf); err == nil {
-		for _, e := range events {
-			switch e.Type {
-			case vad.SpeechStart:
-				if !o.userSpeaking {
-					o.userSpeaking = true
-					if o.state == stateResponding {
-						o.interruptResponse("vad_speech_start")
-					}
-					logger.Pipeline(slog.LevelInfo, logger.EventVADSpeechStart,
-						"User started speaking",
-						"room", o.room(), "turn", o.turn+1,
-					)
+	events, err := o.cfg.Plugins.VAD.Analyze(ctx, vf)
+	if err != nil {
+		logger.Pipeline(slog.LevelWarn, logger.EventVADAnalyzeFailed,
+			"VAD analyze failed",
+			"room", o.room(), "turn", o.turn+1,
+			"provider", o.cfg.Plugins.VAD.Name(),
+			"sample_rate", vf.SampleRate,
+			"samples", len(vf.Samples),
+			"rms", int(audio.RMS(vf.Samples)),
+			"error", err,
+		)
+	}
+	o.logVADDiagnostics(vf)
+	for _, e := range events {
+		switch e.Type {
+		case vad.SpeechStart:
+			if !o.userSpeaking {
+				o.userSpeaking = true
+				o.utteranceTurn = o.turn + 1
+				o.speechStartAt = time.Now()
+				o.speechEndAt = time.Time{}
+				o.firstTranscriptHit = false
+				if o.state == stateResponding {
+					o.interruptResponse("vad_speech_start")
 				}
-			case vad.SpeechEnd:
-				if o.userSpeaking {
-					o.userSpeaking = false
-					logger.Pipeline(slog.LevelDebug, logger.EventVADSpeechEnd,
-						"User stopped speaking",
-						"room", o.room(), "turn", o.turn+1,
-					)
-					o.maybeEndTurn(ctx)
+				logger.Pipeline(slog.LevelInfo, logger.EventVADSpeechStart,
+					"User started speaking",
+					"room", o.room(), "turn", o.turn+1,
+				)
+			}
+		case vad.SpeechEnd:
+			if o.userSpeaking {
+				o.userSpeaking = false
+				o.speechEndAt = time.Now()
+				logger.Pipeline(slog.LevelDebug, logger.EventVADSpeechEnd,
+					"User stopped speaking",
+					"room", o.room(), "turn", o.turn+1,
+				)
+				if o.pending.Len() == 0 && !o.firstTranscriptHit {
+					o.emitMetric(o.utteranceTurn, "stt", "empty_result", "count", 1, nil)
 				}
+				o.maybeEndTurn(ctx)
 			}
 		}
 	}
@@ -201,6 +254,42 @@ func (o *Orchestrator) onAudio(ctx context.Context, sttSess stt.Session, frame a
 	}
 }
 
+func (o *Orchestrator) logVADDiagnostics(frame audio.Frame) {
+	now := time.Now()
+	if !o.nextVADLevelLog.IsZero() && now.Before(o.nextVADLevelLog) {
+		return
+	}
+	o.nextVADLevelLog = now.Add(time.Second)
+	diagnosticProvider, ok := o.cfg.Plugins.VAD.(vad.DiagnosticProvider)
+	if !ok {
+		logger.Pipeline(slog.LevelDebug, logger.EventVADProbability,
+			"VAD diagnostics unavailable",
+			"room", o.room(), "turn", o.turn+1,
+			"provider", o.cfg.Plugins.VAD.Name(),
+			"sample_rate", frame.SampleRate,
+			"samples", len(frame.Samples),
+			"rms", int(audio.RMS(frame.Samples)),
+		)
+		return
+	}
+	d := diagnosticProvider.Diagnostics()
+	logger.Pipeline(slog.LevelDebug, logger.EventVADProbability,
+		"VAD probability sample",
+		"room", o.room(), "turn", o.turn+1,
+		"provider", o.cfg.Plugins.VAD.Name(),
+		"probability", d.LastProbability,
+		"speaking", d.Speaking,
+		"silent_count", d.SilentCount,
+		"pending_samples", d.PendingSamples,
+		"window_size", d.WindowSize,
+		"speech_threshold", d.SpeechThreshold,
+		"silence_threshold", d.SilenceThreshold,
+		"sample_rate", frame.SampleRate,
+		"samples", len(frame.Samples),
+		"rms", int(audio.RMS(frame.Samples)),
+	)
+}
+
 // onTranscript buffers finalized transcript segments for the current turn.
 // Interim results are also useful as a barge-in signal while the agent is
 // speaking, because they arrive even when VAD misses the start of speech.
@@ -208,6 +297,14 @@ func (o *Orchestrator) onTranscript(ctx context.Context, res stt.Result) {
 	text := strings.TrimSpace(res.Text)
 	if text == "" {
 		return
+	}
+	if !o.firstTranscriptHit {
+		o.firstTranscriptHit = true
+		o.firstTranscriptAt = time.Now()
+		if !o.speechStartAt.IsZero() {
+			o.emitMetric(o.utteranceTurn, "stt", "first_transcript_ms", "ms",
+				float64(o.firstTranscriptAt.Sub(o.speechStartAt).Milliseconds()), nil)
+		}
 	}
 	if o.state == stateResponding {
 		reason := "stt_interim"
@@ -242,6 +339,10 @@ func (o *Orchestrator) onTranscript(ctx context.Context, res stt.Result) {
 		"text_len", len(text),
 		"text_preview", logger.Preview(text, 80),
 	)
+	if !o.speechEndAt.IsZero() {
+		o.emitMetric(o.utteranceTurn, "stt", "final_transcript_ms", "ms",
+			float64(time.Since(o.speechEndAt).Milliseconds()), nil)
+	}
 	if o.pending.Len() > 0 {
 		o.pending.WriteByte(' ')
 	}
@@ -273,6 +374,11 @@ func (o *Orchestrator) maybeEndTurn(ctx context.Context) {
 		"room", o.room(), "turn", o.turn,
 		"text", text, "text_len", len(text),
 	)
+	if !o.speechEndAt.IsZero() {
+		o.emitMetric(o.turn, "stt", "turn_latency_ms", "ms",
+			float64(time.Since(o.speechEndAt).Milliseconds()), nil)
+	}
+	o.resetUtteranceTiming()
 	o.publishTranscript(transcript.SpeakerUser, text, true, o.turn)
 	o.startResponse(ctx, text)
 }
@@ -374,11 +480,13 @@ func (o *Orchestrator) runResponse(ctx context.Context, turn int, started time.T
 		}
 		if !llmFirstToken && chunk.Delta != "" {
 			llmFirstToken = true
+			ttft := time.Since(llmStart).Milliseconds()
 			logger.Pipeline(slog.LevelInfo, logger.EventLLMFirstToken,
 				"LLM first token",
 				"room", o.room(), "turn", turn,
-				"ttfb_ms", time.Since(llmStart).Milliseconds(),
+				"ttfb_ms", ttft,
 			)
+			o.emitMetric(turn, "llm", "ttft_ms", "ms", float64(ttft), nil)
 		}
 		full.WriteString(chunk.Delta)
 		if chunk.Delta != "" {
@@ -390,6 +498,11 @@ func (o *Orchestrator) runResponse(ctx context.Context, turn int, started time.T
 			if !o.speak(ctx, turn, sentence) {
 				return "", false // context cancelled mid-reply
 			}
+		}
+		if chunk.Usage != nil {
+			o.emitMetric(turn, "llm", "prompt_tokens", "tokens", float64(chunk.Usage.PromptTokens), nil)
+			o.emitMetric(turn, "llm", "completion_tokens", "tokens", float64(chunk.Usage.CompletionTokens), nil)
+			o.emitMetric(turn, "llm", "total_tokens", "tokens", float64(chunk.Usage.TotalTokens), nil)
 		}
 		if chunk.Done {
 			break
@@ -409,6 +522,8 @@ func (o *Orchestrator) runResponse(ctx context.Context, turn int, started time.T
 		"text_len", full.Len(),
 		"duration_ms", time.Since(llmStart).Milliseconds(),
 	)
+	durationMs := float64(time.Since(llmStart).Milliseconds())
+	o.emitMetric(turn, "llm", "duration_ms", "ms", durationMs, nil)
 	if full.Len() > 0 {
 		o.publishTranscript(transcript.SpeakerAgent, full.String(), true, turn)
 	}
@@ -444,6 +559,7 @@ func (o *Orchestrator) speak(ctx context.Context, turn int, text string) bool {
 	)
 
 	ttsStart := time.Now()
+	o.transport.SetPendingTTS(turn, ttsStart)
 	chunks, err := o.cfg.Plugins.TTS.Synthesize(ctx, text)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -460,6 +576,8 @@ func (o *Orchestrator) speak(ctx context.Context, turn int, text string) bool {
 	reframe := audio.NewSampleBuffer(audio.WebrtcSampleRate)
 
 	var ttsFirstAudio bool
+	var firstAudioAt time.Time
+	var lastAudioAt time.Time
 
 	for chunk := range chunks {
 		if chunk.Err != nil {
@@ -473,14 +591,19 @@ func (o *Orchestrator) speak(ctx context.Context, turn int, text string) bool {
 			break
 		}
 		if len(chunk.Samples) > 0 {
+			now := time.Now()
 			if !ttsFirstAudio {
 				ttsFirstAudio = true
+				firstAudioAt = now
+				firstByteMs := now.Sub(ttsStart).Milliseconds()
 				logger.Pipeline(slog.LevelInfo, logger.EventTTSFirstAudio,
 					"TTS first audio",
 					"room", o.room(), "turn", turn,
-					"ttfb_ms", time.Since(ttsStart).Milliseconds(),
+					"ttfb_ms", firstByteMs,
 				)
+				o.emitMetric(turn, "tts", "first_byte_ms", "ms", float64(firstByteMs), nil)
 			}
+			lastAudioAt = now
 			for _, f := range reframe.Push(rs.Process(chunk.Samples)) {
 				if !o.send(ctx, f) {
 					return false
@@ -496,6 +619,13 @@ func (o *Orchestrator) speak(ctx context.Context, turn int, text string) bool {
 		if !o.send(ctx, f) {
 			return false
 		}
+	}
+
+	synthesisMs := float64(time.Since(ttsStart).Milliseconds())
+	o.emitMetric(turn, "tts", "synthesis_ms", "ms", synthesisMs, nil)
+	if !firstAudioAt.IsZero() && !lastAudioAt.IsZero() {
+		o.emitMetric(turn, "tts", "streaming_ms", "ms",
+			float64(lastAudioAt.Sub(firstAudioAt).Milliseconds()), nil)
 	}
 	return true
 }

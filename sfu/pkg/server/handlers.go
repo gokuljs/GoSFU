@@ -14,7 +14,8 @@ type createRoomResponse struct {
 }
 
 type joinRoomRequest struct {
-	Sdp webrtc.SessionDescription `json:"sdp"`
+	Sdp          webrtc.SessionDescription `json:"sdp"`
+	SystemPrompt string                    `json:"systemPrompt,omitempty"`
 }
 
 type joinRoomResponse struct {
@@ -55,7 +56,7 @@ func (s *Server) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := rm.HandleJoin(req.Sdp)
+	result, err := rm.HandleJoin(req.Sdp, req.SystemPrompt)
 	if err != nil {
 		switch err {
 		case room.ErrRoomFull:
@@ -83,7 +84,7 @@ func (s *Server) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleRoomDebug(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStopSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		setCORS(w)
 		w.WriteHeader(http.StatusNoContent)
@@ -91,15 +92,37 @@ func (s *Server) handleRoomDebug(w http.ResponseWriter, r *http.Request) {
 	}
 
 	roomId := r.PathValue("id")
-	if _, ok := s.rooms.Get(roomId); !ok {
+	rm, ok := s.rooms.Get(roomId)
+	if !ok {
 		http.Error(w, "room not found", http.StatusNotFound)
 		return
 	}
 
-	s.rooms.Debug().ServeWS(w, r, roomId)
+	rm.StopSession()
+	setCORS(w)
+	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleRoomTranscript(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteRoom(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		setCORS(w)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	roomId := r.PathValue("id")
+	rm, ok := s.rooms.Get(roomId)
+	if !ok {
+		http.Error(w, "room not found", http.StatusNotFound)
+		return
+	}
+
+	rm.Close()
+	setCORS(w)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleRoomStream(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		setCORS(w)
 		w.WriteHeader(http.StatusNoContent)
@@ -112,7 +135,7 @@ func (s *Server) handleRoomTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.rooms.Transcript().ServeWS(w, r, roomId)
+	s.rooms.Stream().ServeWS(w, r, roomId)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -124,6 +147,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func setCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }

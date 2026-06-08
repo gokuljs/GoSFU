@@ -52,7 +52,7 @@ func (h *Hub) Publish(event Event) {
 		event.TS = time.Now().UTC()
 	}
 	if event.Category == "" {
-		event.Category = categoryFor(event.Type)
+		event.Category = CategoryFor(event.Type)
 	}
 	if event.Level == "" {
 		event.Level = "info"
@@ -86,21 +86,21 @@ func (h *Hub) PublishEvent(room, typ, level, msg string, attrs map[string]any) {
 		Message: msg,
 		Source:  "server",
 		Attrs:   attrs,
-		Turn:    turnFromAttrs(attrs),
+		Turn:    TurnFromAttrs(attrs),
 	})
 }
 
 func (h *Hub) PublishPipeline(level slog.Level, event, msg string, attrs ...any) {
-	values := attrsMap(attrs...)
+	values := AttrsMap(attrs...)
 	room, _ := values["room"].(string)
 	h.Publish(Event{
 		Room:     room,
 		Type:     event,
-		Category: categoryFor(event),
-		Level:    levelString(level),
+		Category: CategoryFor(event),
+		Level:    LevelString(level),
 		Message:  msg,
 		Source:   "pipeline",
-		Turn:     turnFromAttrs(values),
+		Turn:     TurnFromAttrs(values),
 		Attrs:    values,
 	})
 }
@@ -171,7 +171,7 @@ func (h *Hub) Subscribe(room string) (<-chan Event, func()) {
 	}
 }
 
-func attrsMap(attrs ...any) map[string]any {
+func AttrsMap(attrs ...any) map[string]any {
 	values := make(map[string]any, len(attrs)/2)
 	for i := 0; i+1 < len(attrs); i += 2 {
 		key, ok := attrs[i].(string)
@@ -194,7 +194,7 @@ func normalize(v any) any {
 	}
 }
 
-func turnFromAttrs(attrs map[string]any) *int {
+func TurnFromAttrs(attrs map[string]any) *int {
 	value, ok := attrs["turn"]
 	if !ok {
 		return nil
@@ -215,7 +215,7 @@ func turnFromAttrs(attrs map[string]any) *int {
 	return &turn
 }
 
-func categoryFor(event string) string {
+func CategoryFor(event string) string {
 	if strings.HasPrefix(event, "pipeline.") {
 		parts := strings.Split(event, ".")
 		if len(parts) >= 2 {
@@ -229,7 +229,7 @@ func categoryFor(event string) string {
 	return "session"
 }
 
-func levelString(level slog.Level) string {
+func LevelString(level slog.Level) string {
 	switch {
 	case level >= slog.LevelError:
 		return "error"

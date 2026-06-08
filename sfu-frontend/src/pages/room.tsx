@@ -5,21 +5,38 @@ import {
   VideoCameraSlash,
   PhoneDisconnect,
 } from "@phosphor-icons/react"
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { VideoTile } from "@/components/video-tile"
 import { LiveWaveform } from "@/components/ui/live-waveform"
 import { Button } from "@/components/ui/button"
+import { MetricsPanel } from "@/components/metrics-panel"
 import type {
   ConnectionState,
-  IceConnectionStateValue,
   PeerConnectionStateValue,
   SelectedDevices,
 } from "@/hooks/use-webrtc"
-import type { TranscriptMessage } from "@/hooks/use-transcript"
 import type {
-  DebugConnectionState,
   DebugEvent,
-} from "@/hooks/use-session-debug"
+  MetricPoint,
+  StreamConnectionState,
+  TranscriptMessage,
+} from "@/hooks/use-room-stream"
+import { formatLocalTime } from "@/lib/format-time"
+
+const SIDEBAR_WAVEFORM_PROPS = {
+  height: "100%",
+  barWidth: 2,
+  barGap: 2,
+  mode: "static" as const,
+  fadeEdges: true,
+}
 
 interface RoomPageProps {
   localStream: MediaStream | null
@@ -28,40 +45,53 @@ interface RoomPageProps {
   participantId: string | null
   connectionState: ConnectionState
   peerConnectionState: PeerConnectionStateValue
-  iceConnectionState: IceConnectionStateValue
-  debugStatus: DebugConnectionState
-  devices: MediaDeviceInfo[]
+  streamStatus: StreamConnectionState
   selectedDevices: SelectedDevices
   debugEvents: DebugEvent[]
   transcript: TranscriptMessage[]
+  metrics: MetricPoint[]
+  latestByStage: Record<string, Record<string, MetricPoint>>
   onClearEvents: () => void
   isMicOn: boolean
   isCameraOn: boolean
   onToggleMic: () => void
   onToggleCamera: () => void
   onDisconnect: () => void
+  systemPrompt: string
+  onSystemPromptChange: (value: string) => void
+  onStartSession: () => void
+  onStopSession: () => void
+  canEditPrompt: boolean
 }
 
 export function RoomPage({
   localStream,
   remoteStream,
   roomId,
-  participantId,
   connectionState,
   peerConnectionState,
-  iceConnectionState,
-  debugStatus,
-  devices,
+  streamStatus,
   selectedDevices,
   debugEvents,
   transcript,
+  metrics,
+  latestByStage,
   onClearEvents,
   isMicOn,
   isCameraOn,
   onToggleMic,
   onToggleCamera,
   onDisconnect,
+  systemPrompt,
+  onSystemPromptChange,
+  onStartSession,
+  onStopSession,
+  canEditPrompt,
 }: RoomPageProps) {
+  const botHasAudio =
+    !!remoteStream &&
+    remoteStream.getAudioTracks().some((track) => track.readyState === "live")
+
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-[#050505] text-white">
       <header className="flex items-center justify-between border-b border-[#1a1a1a] px-4 py-3">
@@ -74,7 +104,7 @@ export function RoomPage({
         <div className="flex items-center gap-3">
           {roomId && (
             <span
-              className="max-w-[12rem] truncate text-[10px] tracking-wider text-white/30 uppercase"
+              className="max-w-48 truncate text-[10px] tracking-wider text-white/30 uppercase"
               title={roomId}
             >
               Room {shortId(roomId)}
@@ -93,26 +123,60 @@ export function RoomPage({
         </div>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_16rem] gap-2 px-2 pt-2 pb-4 xl:grid-cols-[18rem_minmax(0,1fr)_20rem] xl:grid-rows-[minmax(0,1fr)_16rem]">
-        <section className="grid min-h-0 gap-2 lg:grid-cols-2 xl:grid-cols-1">
+      <main className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_16rem] gap-2 px-2 pt-2 pb-4 xl:grid-cols-[18rem_minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)_16rem]">
+        <section className="grid min-h-0 grid-rows-3 gap-2">
           <Panel title="USER VIDEO" detail={isMicOn ? "MIC LIVE" : "MIC MUTED"}>
-            <div className="space-y-3">
-              <VideoTile stream={localStream} muted label="User" type="human" />
-              <LiveWaveform
-                active={isMicOn}
-                height={42}
-                barWidth={2}
-                barGap={2}
-                barColor="rgba(0, 212, 170, 0.8)"
-                mode="static"
-                fadeEdges
-                sensitivity={1.5}
-              />
-            </div>
+            <SidebarCardLayout
+              main={
+                <VideoTile
+                  stream={localStream}
+                  muted
+                  label="User"
+                  type="human"
+                  compact
+                />
+              }
+              waveform={
+                <LiveWaveform
+                  active={isMicOn}
+                  barColor="rgba(0, 212, 170, 0.8)"
+                  sensitivity={1.5}
+                  {...SIDEBAR_WAVEFORM_PROPS}
+                />
+              }
+              footer={<span className="sr-only">User audio monitor</span>}
+            />
           </Panel>
           <Panel title="BOT VIDEO" detail={remoteStream ? "AGENT AUDIO" : "IDLE"}>
-            <VideoTile stream={remoteStream} label="Agent" type="agent" />
+            <SidebarCardLayout
+              main={
+                <VideoTile
+                  stream={remoteStream}
+                  label="Agent"
+                  type="agent"
+                  compact
+                />
+              }
+              waveform={
+                <LiveWaveform
+                  active={botHasAudio}
+                  mediaStream={remoteStream}
+                  barColor="rgba(0, 212, 170, 0.8)"
+                  sensitivity={1.8}
+                  {...SIDEBAR_WAVEFORM_PROPS}
+                />
+              }
+              footer={<span className="sr-only">Agent audio monitor</span>}
+            />
           </Panel>
+          <AgentConfigPanel
+            systemPrompt={systemPrompt}
+            onSystemPromptChange={onSystemPromptChange}
+            onStartSession={onStartSession}
+            onStopSession={onStopSession}
+            canEditPrompt={canEditPrompt}
+            connectionState={connectionState}
+          />
         </section>
 
         <Panel
@@ -124,18 +188,17 @@ export function RoomPage({
           <TranscriptPanel transcript={transcript} connectionState={connectionState} />
         </Panel>
 
-        <SessionPanel
-          roomId={roomId}
-          participantId={participantId}
-          connectionState={connectionState}
-          peerConnectionState={peerConnectionState}
-          iceConnectionState={iceConnectionState}
-          debugStatus={debugStatus}
-          devices={devices}
-          selectedDevices={selectedDevices}
-          isMicOn={isMicOn}
-          isCameraOn={isCameraOn}
-        />
+        <section className="flex min-h-0 flex-col gap-2">
+          <SessionPanel
+            roomId={roomId}
+            connectionState={connectionState}
+            peerConnectionState={peerConnectionState}
+            streamStatus={streamStatus}
+            selectedDevices={selectedDevices}
+            isMicOn={isMicOn}
+          />
+          <MetricsPanel metrics={metrics} latestByStage={latestByStage} />
+        </section>
 
         <Panel
           title="EVENTS"
@@ -202,6 +265,88 @@ function Controls({
         <PhoneDisconnect weight="fill" />
       </Button>
     </div>
+  )
+}
+
+function SidebarCardLayout({
+  main,
+  waveform,
+  footer,
+}: {
+  main: ReactNode
+  waveform: ReactNode
+  footer: ReactNode
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="min-h-0 flex-1">{main}</div>
+      <div className="h-8 shrink-0">{waveform}</div>
+      <div className="flex h-7 shrink-0 items-center">{footer}</div>
+    </div>
+  )
+}
+
+function AgentConfigPanel({
+  systemPrompt,
+  onSystemPromptChange,
+  onStartSession,
+  onStopSession,
+  canEditPrompt,
+  connectionState,
+}: {
+  systemPrompt: string
+  onSystemPromptChange: (value: string) => void
+  onStartSession: () => void
+  onStopSession: () => void
+  canEditPrompt: boolean
+  connectionState: ConnectionState
+}) {
+  const sessionActive =
+    connectionState === "connecting" || connectionState === "connected"
+
+  return (
+    <Panel title="SYSTEM PROMPT" detail={canEditPrompt ? "EDITABLE" : "LOCKED"}>
+      <SidebarCardLayout
+        main={
+          <textarea
+            value={systemPrompt}
+            onChange={(event) => onSystemPromptChange(event.target.value)}
+            readOnly={!canEditPrompt}
+            placeholder="Define how the agent should behave..."
+            className="h-full w-full resize-none border border-[#1a1a1a] bg-[#050505] px-2 py-2 font-mono text-[10px] leading-5 text-white/60 outline-none placeholder:text-white/20 read-only:cursor-default read-only:text-white/40 focus:border-[#00d4aa]/30"
+          />
+        }
+        waveform={
+          <LiveWaveform
+            active={false}
+            barColor="rgba(0, 212, 170, 0.35)"
+            {...SIDEBAR_WAVEFORM_PROPS}
+          />
+        }
+        footer={
+          sessionActive ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 w-full border-[#1a1a1a] bg-[#050505] text-[10px] tracking-wider text-[#ffaa00] hover:border-[#ffaa00]/30 hover:bg-[#ffaa00]/5"
+              onClick={onStopSession}
+            >
+              Stop Session
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 w-full border-[#1a1a1a] bg-[#050505] text-[10px] tracking-wider text-[#00d4aa] hover:border-[#00d4aa]/30 hover:bg-[#00d4aa]/5"
+              onClick={onStartSession}
+              disabled={!systemPrompt.trim()}
+            >
+              Start Session
+            </Button>
+          )
+        }
+      />
+    </Panel>
   )
 }
 
@@ -283,7 +428,7 @@ function TranscriptPanel({
             <div className="mb-1.5 flex items-center gap-2 text-[9px] uppercase tracking-wider text-white/30">
               <span>{item.speaker === "user" ? "USER" : "BOT"}</span>
               {item.turn !== undefined && <span>TURN {item.turn}</span>}
-              <span>{formatTime(item.ts)}</span>
+              <span>{formatLocalTime(item.ts)}</span>
               {item.interim && <span className="text-[#00d4aa]">INTERIM</span>}
             </div>
             <p className="text-[11px] leading-5 text-white/70">{item.text}</p>
@@ -297,79 +442,63 @@ function TranscriptPanel({
 
 function SessionPanel({
   roomId,
-  participantId,
   connectionState,
   peerConnectionState,
-  iceConnectionState,
-  debugStatus,
-  devices,
+  streamStatus,
   selectedDevices,
   isMicOn,
-  isCameraOn,
-}: Pick<
-  RoomPageProps,
-  | "roomId"
-  | "participantId"
-  | "connectionState"
-  | "peerConnectionState"
-  | "iceConnectionState"
-  | "debugStatus"
-  | "devices"
-  | "selectedDevices"
-  | "isMicOn"
-  | "isCameraOn"
->) {
-  const deviceCounts = useMemo(
-    () => ({
-      audioinput: devices.filter((device) => device.kind === "audioinput").length,
-      videoinput: devices.filter((device) => device.kind === "videoinput").length,
-      audiooutput: devices.filter((device) => device.kind === "audiooutput").length,
-    }),
-    [devices]
-  )
+}: {
+  roomId: string | null
+  connectionState: ConnectionState
+  peerConnectionState: PeerConnectionStateValue
+  streamStatus: StreamConnectionState
+  selectedDevices: SelectedDevices
+  isMicOn: boolean
+}) {
+  const combinedState = useMemo(() => {
+    if (
+      connectionState === "failed" ||
+      peerConnectionState === "failed" ||
+      streamStatus === "failed"
+    ) {
+      return "failed"
+    }
+    if (
+      connectionState === "connected" &&
+      peerConnectionState === "connected" &&
+      streamStatus === "connected"
+    ) {
+      return "connected"
+    }
+    if (
+      connectionState === "connecting" ||
+      peerConnectionState === "connecting" ||
+      streamStatus === "connecting"
+    ) {
+      return "connecting"
+    }
+    return "idle"
+  }, [connectionState, peerConnectionState, streamStatus])
 
   return (
-    <Panel title="SESSION" detail="LIVE STATE" className="min-h-0" bodyClassName="min-h-0">
-      <div className="h-full min-h-0 overflow-y-auto">
-        <div className="space-y-3">
-          <StatusRow label="CLIENT" value={labelForState(connectionState)} />
-          <StatusRow label="AGENT" value={agentStateLabel(peerConnectionState)} />
-          <StatusRow label="DEBUG WS" value={labelForState(debugStatus)} />
-          <Divider />
-          <InfoRow label="MICROPHONE" value={selectedDevices.audioInput} />
-          <InfoRow label="CAMERA" value={selectedDevices.videoInput} />
-          <InfoRow label="AUDIO OUTPUT" value={selectedDevices.audioOutput} />
-          <InfoRow
-            label="DEVICE COUNTS"
-            value={`${deviceCounts.audioinput} mic / ${deviceCounts.videoinput} camera / ${deviceCounts.audiooutput} output`}
-          />
-          <Divider />
-          <InfoRow label="TRANSPORT" value="WebRTC + WebSocket debug" />
-          <InfoRow label="SESSION ID" value={shortId(roomId)} title={roomId ?? ""} />
-          <InfoRow
-            label="PARTICIPANT ID"
-            value={shortId(participantId)}
-            title={participantId ?? ""}
-          />
-          <InfoRow label="CONNECTION" value={peerConnectionState} />
-          <InfoRow label="ICE" value={iceConnectionState} />
-          <InfoRow label="MIC TRACK" value={isMicOn ? "enabled" : "muted"} />
-          <InfoRow label="CAMERA TRACK" value={isCameraOn ? "enabled" : "off"} />
+    <Panel title="SESSION" detail="LIVE" className="shrink-0" bodyClassName="p-2">
+      <div className="space-y-2.5">
+        <InfoRow label="ROOM ID" value={shortId(roomId)} title={roomId ?? ""} />
+        <InfoRow
+          label="MICROPHONE"
+          value={`${isMicOn ? "live" : "muted"} · ${selectedDevices.audioInput || "default"}`}
+        />
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[9px] tracking-wider text-white/25 uppercase">
+            Connection
+          </span>
+          <span className="flex items-center gap-2 text-[10px] font-medium tracking-wider text-white/60 uppercase">
+            <StatusDot state={combinedState} />
+            {combinedState}
+          </span>
         </div>
       </div>
     </Panel>
-  )
-}
-
-function StatusRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-[10px] tracking-wider text-white/40">{label}</span>
-      <span className="flex items-center gap-2 text-[10px] font-medium tracking-wider text-white/60">
-        <StatusDot state={value} />
-        {value.toUpperCase()}
-      </span>
-    </div>
   )
 }
 
@@ -394,10 +523,6 @@ function InfoRow({
   )
 }
 
-function Divider() {
-  return <div className="h-px bg-[#1a1a1a]" />
-}
-
 function EventLogPanel({
   events,
   onClearEvents,
@@ -410,26 +535,48 @@ function EventLogPanel({
   const [query, setQuery] = useState("")
   const [paused, setPaused] = useState(false)
   const [pausedEvents, setPausedEvents] = useState<DebugEvent[]>([])
+  const [categories, setCategories] = useState<string[]>([])
+  const listRef = useRef<HTMLDivElement>(null)
+  const pinnedToTopRef = useRef(true)
+  const knownCategoriesRef = useRef(new Set<string>())
   const displayEvents = paused ? pausedEvents : events
 
-  const categories = useMemo(
-    () => Array.from(new Set(events.map((event) => event.category))).sort(),
-    [events]
-  )
+  useEffect(() => {
+    if (events.length === 0) {
+      knownCategoriesRef.current.clear()
+      setCategories([])
+      return
+    }
+
+    let changed = false
+    for (const event of events) {
+      if (!knownCategoriesRef.current.has(event.category)) {
+        knownCategoriesRef.current.add(event.category)
+        changed = true
+      }
+    }
+    if (changed) {
+      setCategories(Array.from(knownCategoriesRef.current).sort())
+    }
+  }, [events])
 
   const filteredEvents = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
-    return displayEvents
-      .filter((event) => category === "all" || event.category === category)
-      .filter((event) => level === "all" || event.level === level)
-      .filter((event) => {
-        if (!normalizedQuery) return true
-        return `${event.type} ${event.message} ${JSON.stringify(event.attrs ?? {})}`
-          .toLowerCase()
-          .includes(normalizedQuery)
-      })
-      .slice(-180)
+    const matches = displayEvents.filter((event) => {
+      if (category !== "all" && event.category !== category) return false
+      if (level !== "all" && event.level !== level) return false
+      if (!normalizedQuery) return true
+      return `${event.type} ${event.message} ${JSON.stringify(event.attrs ?? {})}`
+        .toLowerCase()
+        .includes(normalizedQuery)
+    })
+    return matches.slice(-180).reverse()
   }, [category, displayEvents, level, query])
+
+  useEffect(() => {
+    if (paused || !pinnedToTopRef.current || !listRef.current) return
+    listRef.current.scrollTop = 0
+  }, [filteredEvents, paused])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
@@ -482,13 +629,25 @@ function EventLogPanel({
           variant="outline"
           size="sm"
           className="h-6 border-[#1a1a1a] bg-[#050505] text-[10px] tracking-wider text-white/50 hover:border-[#00d4aa]/30 hover:text-[#00d4aa]"
-          onClick={onClearEvents}
+          onClick={() => {
+            knownCategoriesRef.current.clear()
+            setCategories([])
+            pinnedToTopRef.current = true
+            onClearEvents()
+          }}
         >
           CLEAR
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto border border-[#1a1a1a] bg-[#050505]">
+      <div
+        ref={listRef}
+        onScroll={() => {
+          if (!listRef.current) return
+          pinnedToTopRef.current = listRef.current.scrollTop < 8
+        }}
+        className="min-h-0 flex-1 overflow-y-auto border border-[#1a1a1a] bg-[#050505]"
+      >
         {filteredEvents.length === 0 ? (
           <div className="flex h-full items-center justify-center text-[10px] tracking-wider text-white/25 uppercase">
             No events match the current filters.
@@ -505,10 +664,10 @@ function EventLogPanel({
   )
 }
 
-function EventRow({ event }: { event: DebugEvent }) {
+const EventRow = memo(function EventRow({ event }: { event: DebugEvent }) {
   return (
     <div className="grid grid-cols-[4rem_4rem_9rem_minmax(0,1fr)] gap-3 px-3 py-1.5 text-[10px]">
-      <span className="font-mono text-white/25">{formatTime(event.ts)}</span>
+      <span className="font-mono text-white/25">{formatLocalTime(event.ts)}</span>
       <span className={levelClass(event.level)}>{event.level.toUpperCase()}</span>
       <span className="truncate font-mono text-[#00d4aa]/50" title={event.type}>
         {event.type}
@@ -523,7 +682,7 @@ function EventRow({ event }: { event: DebugEvent }) {
       </div>
     </div>
   )
-}
+})
 
 function StatusDot({ state }: { state: string }) {
   const tone =
@@ -549,25 +708,10 @@ function labelForState(state: string) {
   return state
 }
 
-function agentStateLabel(peerState: PeerConnectionStateValue) {
-  if (peerState === "connected") return "connected"
-  if (peerState === "connecting" || peerState === "new") return "connecting"
-  if (peerState === "failed" || peerState === "closed") return "failed"
-  return "idle"
-}
-
 function shortId(value: string | null) {
   if (!value) return "Unavailable"
   if (value.length <= 12) return value
   return `${value.slice(0, 8)}...${value.slice(-4)}`
-}
-
-function formatTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(value))
 }
 
 function levelClass(level: DebugEvent["level"]) {

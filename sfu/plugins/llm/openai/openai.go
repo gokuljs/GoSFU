@@ -135,6 +135,19 @@ func (p *Provider) StreamCompletion(ctx context.Context, msgs []llm.Message) (<-
 				}
 				return
 			}
+			if chunk.Usage != nil {
+				usage := &llm.Usage{
+					PromptTokens:     chunk.Usage.PromptTokens,
+					CompletionTokens: chunk.Usage.CompletionTokens,
+					TotalTokens:      chunk.Usage.TotalTokens,
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case out <- llm.Chunk{Done: true, Usage: usage}:
+				}
+				return
+			}
 			if len(chunk.Choices) == 0 {
 				continue
 			}
@@ -182,6 +195,11 @@ type streamChunk struct {
 			Content string `json:"content"`
 		} `json:"delta"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage,omitempty"`
 }
 
 func toOpenAIMessages(msgs []llm.Message) []openAIMessage {
@@ -202,6 +220,7 @@ func marshalChatRequest(cfg Config, msgs []llm.Message) ([]byte, error) {
 	payload["model"] = cfg.Model
 	payload["messages"] = toOpenAIMessages(msgs)
 	payload["stream"] = true
+	payload["stream_options"] = map[string]any{"include_usage": true}
 	if cfg.Temperature != nil {
 		payload["temperature"] = *cfg.Temperature
 	}

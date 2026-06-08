@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"time"
 
 	"github.com/gokuljs/goSfu/pkg/agent/audio"
 	"github.com/pion/webrtc/v4"
@@ -15,6 +16,7 @@ type WebRTC struct {
 	outbound *audio.Outbound
 	pacer    *audio.FramePacer
 	playback chan audio.Frame
+	bridge   playoutBridge
 }
 
 func NewWebrtc(pc *webrtc.PeerConnection, roomID string) (*WebRTC, error) {
@@ -40,7 +42,7 @@ func NewWebrtc(pc *webrtc.PeerConnection, roomID string) (*WebRTC, error) {
 	// Small channel: the pacer's bounded jitter buffer is the real backpressure
 	// ceiling, so Send blocks once the pacer is full instead of dropping audio.
 	playback := make(chan audio.Frame, 8)
-	return &WebRTC{
+	t := &WebRTC{
 		pc:       pc,
 		track:    track,
 		sender:   sender,
@@ -48,7 +50,11 @@ func NewWebrtc(pc *webrtc.PeerConnection, roomID string) (*WebRTC, error) {
 		outbound: outbound,
 		pacer:    audio.NewFramePacer(playback, 8, roomID),
 		playback: playback,
-	}, nil
+	}
+	t.pacer.SetOnPlayoutStarted(func(bufferedMs int) {
+		t.bridge.onPlayoutStarted(bufferedMs)
+	})
+	return t, nil
 }
 
 func (t *WebRTC) HandleRemoteTrack(ctx context.Context, track *webrtc.TrackRemote) {
@@ -65,6 +71,12 @@ func (t *WebRTC) Send(ctx context.Context, frame audio.Frame) error {
 }
 func (t *WebRTC) WaitForPlayout(ctx context.Context) error { return t.pacer.WaitForDrain(ctx) }
 func (t *WebRTC) ClearPlayout()                            { t.pacer.Clear() }
+func (t *WebRTC) SetPendingTTS(turn int, startedAt time.Time) {
+	t.bridge.setPending(turn, startedAt)
+}
+func (t *WebRTC) SetOnPlayoutStarted(fn func(turn int, bufferedMs int, elapsedMs int64)) {
+	t.bridge.setCallback(fn)
+}
 func (t *WebRTC) Start(ctx context.Context) error {
 	go t.drainRTCP(ctx)
 	go t.pacer.Run(ctx)
