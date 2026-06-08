@@ -7,6 +7,19 @@ import {
 } from "react"
 import { formatLocalTime } from "@/lib/format-time"
 
+const axisTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+})
+
+function formatAxisTime(ts: number): string {
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return "--:--"
+  return axisTimeFormatter.format(d)
+}
+
 export interface ChartPoint {
   id: string
   ts: number
@@ -39,7 +52,8 @@ const AXIS_COLOR = "rgba(255,255,255,0.15)"
 const LINE_COLOR = "rgba(255,255,255,0.92)"
 const ANIMATION_MS = 220
 const POINT_GAP = 42
-const AXIS_HEIGHT = 18
+const AXIS_HEIGHT = 22
+const MIN_LABEL_SPACING = 72
 
 interface HoverState {
   x: number
@@ -365,12 +379,11 @@ function drawChart(
     ctx.fillStyle = AXIS_COLOR
     ctx.font = "9px 'JetBrains Mono Variable', monospace"
     ctx.textAlign = "center"
-    visibleAxisTimestamps(bounds).forEach((ts) => {
-      ctx.fillText(
-        formatLocalTime(new Date(ts).toISOString()),
-        xForTimestamp(bounds, ts),
-        height - 5
-      )
+    const visibleTs = visibleAxisTimestamps(bounds)
+    visibleTs.forEach((ts) => {
+      const x = xForTimestamp(bounds, ts)
+      const labelX = Math.max(28, Math.min(x, width - 28))
+      ctx.fillText(formatAxisTime(ts), labelX, height - 6)
     })
   }
 }
@@ -452,11 +465,30 @@ function yForValue(bounds: ChartBounds, value: number) {
 }
 
 function visibleAxisTimestamps(bounds: ChartBounds) {
-  if (bounds.timestamps.length <= 6) return bounds.timestamps
-  const step = Math.ceil(bounds.timestamps.length / 6)
-  return bounds.timestamps.filter(
-    (_, index) => index % step === 0 || index === bounds.timestamps.length - 1
-  )
+  if (bounds.timestamps.length === 0) return []
+  if (bounds.timestamps.length === 1) return bounds.timestamps
+
+  const result: number[] = []
+  let lastX = -MIN_LABEL_SPACING
+
+  for (let i = 0; i < bounds.timestamps.length; i++) {
+    const ts = bounds.timestamps[i]
+    const x = xForTimestamp(bounds, ts)
+    if (x - lastX >= MIN_LABEL_SPACING) {
+      result.push(ts)
+      lastX = x
+    }
+  }
+
+  const lastTs = bounds.timestamps[bounds.timestamps.length - 1]
+  if (result[result.length - 1] !== lastTs) {
+    const lastTsX = xForTimestamp(bounds, lastTs)
+    if (lastTsX - lastX >= MIN_LABEL_SPACING * 0.6) {
+      result.push(lastTs)
+    }
+  }
+
+  return result
 }
 
 function interpolateSeries(

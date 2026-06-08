@@ -4,7 +4,7 @@ import {
   MetricsChart,
   type ChartSeries,
 } from "@/components/metrics-chart"
-import { avgValue, buildSeries, latestValue } from "@/lib/metrics-series"
+import { avgValue, buildSeries, latestValue, minValue } from "@/lib/metrics-series"
 import type { MetricPoint } from "@/hooks/use-room-stream"
 import { formatLocalTime } from "@/lib/format-time"
 
@@ -41,12 +41,6 @@ const LATENCY_FILTERS = [
   { stage: "tts", name: "synthesis_ms", id: "tts-synth", label: "TTS Synth", color: TEAL_MID },
 ]
 
-const TOKEN_FILTERS = [
-  { stage: "llm", name: "prompt_tokens", id: "prompt", label: "Prompt", color: TEAL_DIM },
-  { stage: "llm", name: "completion_tokens", id: "completion", label: "Completion", color: TEAL },
-  { stage: "llm", name: "total_tokens", id: "total", label: "Total", color: TEAL_MID },
-]
-
 const PRIMARY_SPARK_BY_STAGE = {
   stt: "stt-first",
   llm: "llm-ttft",
@@ -65,7 +59,6 @@ export function MetricsPanel({ metrics, latestByStage }: MetricsPanelProps) {
     () => buildSeries(metrics, LATENCY_FILTERS),
     [metrics]
   )
-  const tokenSeries = useMemo(() => buildSeries(metrics, TOKEN_FILTERS), [metrics])
 
   return (
     <>
@@ -102,7 +95,6 @@ export function MetricsPanel({ metrics, latestByStage }: MetricsPanelProps) {
         <ExpandOverlay
           onClose={() => setExpanded(false)}
           latencySeries={latencySeries}
-          tokenSeries={tokenSeries}
         />
       )}
     </>
@@ -188,14 +180,16 @@ function StageCard({
 function ExpandOverlay({
   onClose,
   latencySeries,
-  tokenSeries,
 }: {
   onClose: () => void
   latencySeries: ChartSeries[]
-  tokenSeries: ChartSeries[]
 }) {
-  const latencyPoints = latencySeries.flatMap((s) => s.points)
-  const tokenPoints = tokenSeries.flatMap((s) => s.points)
+  const sttSeries = latencySeries.filter((s) => s.id === "stt-first")
+  const llmSeries = latencySeries.filter((s) => s.id === "llm-ttft")
+  const ttsSeries = latencySeries.filter((s) => s.id === "tts-byte")
+  const totalPoints = sttSeries.flatMap((s) => s.points).length +
+    llmSeries.flatMap((s) => s.points).length +
+    ttsSeries.flatMap((s) => s.points).length
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
@@ -216,46 +210,36 @@ function ExpandOverlay({
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           <ChartBlock
-            title="STT Timeline"
-            series={latencySeries.filter((s) => s.id.startsWith("stt"))}
+            title="STT First Transcript"
+            series={sttSeries}
             footer={[
-              { label: "Latest First", value: latestValue(latencySeries.find((s) => s.id === "stt-first")?.points ?? []) },
-              { label: "Latest Final", value: latestValue(latencySeries.find((s) => s.id === "stt-final")?.points ?? []) },
-              { label: "Latest Turn", value: latestValue(latencySeries.find((s) => s.id === "stt-turn")?.points ?? []) },
+              { label: "Latest", value: latestValue(sttSeries[0]?.points ?? []) },
+              { label: "Average", value: avgValue(sttSeries[0]?.points ?? []) },
+              { label: "Min", value: minValue(sttSeries[0]?.points ?? []) },
             ]}
           />
           <ChartBlock
-            title="LLM Timeline"
-            series={latencySeries.filter((s) => s.id.startsWith("llm"))}
+            title="LLM TTFT"
+            series={llmSeries}
             footer={[
-              { label: "Latest TTFT", value: latestValue(latencySeries.find((s) => s.id === "llm-ttft")?.points ?? []) },
-              { label: "Avg TTFT", value: avgValue(latencySeries.find((s) => s.id === "llm-ttft")?.points ?? []) },
-              { label: "Latest Duration", value: latestValue(latencySeries.find((s) => s.id === "llm-duration")?.points ?? []) },
+              { label: "Latest", value: latestValue(llmSeries[0]?.points ?? []) },
+              { label: "Average", value: avgValue(llmSeries[0]?.points ?? []) },
+              { label: "Min", value: minValue(llmSeries[0]?.points ?? []) },
             ]}
           />
           <ChartBlock
-            title="TTS Timeline"
-            series={latencySeries.filter((s) => s.id.startsWith("tts"))}
+            title="TTS TTFB"
+            series={ttsSeries}
             footer={[
-              { label: "Latest TTFB", value: latestValue(latencySeries.find((s) => s.id === "tts-byte")?.points ?? []) },
-              { label: "Latest Playable", value: latestValue(latencySeries.find((s) => s.id === "tts-play")?.points ?? []) },
-              { label: "Latest Synth", value: latestValue(latencySeries.find((s) => s.id === "tts-synth")?.points ?? []) },
+              { label: "Latest", value: latestValue(ttsSeries[0]?.points ?? []) },
+              { label: "Average", value: avgValue(ttsSeries[0]?.points ?? []) },
+              { label: "Min", value: minValue(ttsSeries[0]?.points ?? []) },
             ]}
-          />
-          <ChartBlock
-            title="Tokens"
-            series={tokenSeries}
-            footer={[
-              { label: "Latest Total", value: latestValue(tokenSeries.find((s) => s.id === "total")?.points ?? []) },
-              { label: "Avg Total", value: avgValue(tokenSeries.find((s) => s.id === "total")?.points ?? []) },
-              { label: "Latest Prompt", value: latestValue(tokenSeries.find((s) => s.id === "prompt")?.points ?? []) },
-            ]}
-            formatAsInt
           />
         </div>
 
         <div className="border-t border-[#1a1a1a] px-4 py-2 text-[9px] tracking-wider text-white/20 uppercase">
-          {latencyPoints.length + tokenPoints.length} data points captured
+          {totalPoints} data points captured
         </div>
       </div>
     </div>

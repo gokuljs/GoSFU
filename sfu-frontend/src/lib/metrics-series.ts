@@ -54,3 +54,8 @@ export function latestValue(points: Array<{ value: number }>) {
   if (points.length === 0) return 0
   return points[points.length - 1].value
 }
+
+export function minValue(points: Array<{ value: number }>) {
+  if (points.length === 0) return 0
+  return Math.min(...points.map((p) => p.value))
+}
