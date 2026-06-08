@@ -2,6 +2,8 @@ package transport
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/gokuljs/goSfu/pkg/agent/audio"
 )
@@ -19,7 +21,48 @@ type Transport interface {
 	WaitForPlayout(ctx context.Context) error
 	// ClearPlayout drops any buffered/queued audio (barge-in / interruption).
 	ClearPlayout()
+	// SetPendingTTS records when a TTS utterance started for first-playable timing.
+	SetPendingTTS(turn int, startedAt time.Time)
+	// SetOnPlayoutStarted registers a callback fired when the pacer begins output.
+	SetOnPlayoutStarted(fn func(turn int, bufferedMs int, elapsedMs int64))
 	// Start launches internal media goroutines.
 	Start(ctx context.Context) error
 	Close() error
+}
+
+type pendingTTS struct {
+	turn      int
+	startedAt time.Time
+}
+
+type playoutBridge struct {
+	mu       sync.Mutex
+	pending  *pendingTTS
+	callback func(turn int, bufferedMs int, elapsedMs int64)
+}
+
+func (b *playoutBridge) setPending(turn int, startedAt time.Time) {
+	b.mu.Lock()
+	b.pending = &pendingTTS{turn: turn, startedAt: startedAt}
+	b.mu.Unlock()
+}
+
+func (b *playoutBridge) onPlayoutStarted(bufferedMs int) {
+	b.mu.Lock()
+	p := b.pending
+	cb := b.callback
+	if p != nil {
+		b.pending = nil
+	}
+	b.mu.Unlock()
+	if p == nil || cb == nil {
+		return
+	}
+	cb(p.turn, bufferedMs, time.Since(p.startedAt).Milliseconds())
+}
+
+func (b *playoutBridge) setCallback(fn func(turn int, bufferedMs int, elapsedMs int64)) {
+	b.mu.Lock()
+	b.callback = fn
+	b.mu.Unlock()
 }

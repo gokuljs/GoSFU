@@ -9,17 +9,18 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { VideoTile } from "@/components/video-tile"
 import { LiveWaveform } from "@/components/ui/live-waveform"
 import { Button } from "@/components/ui/button"
+import { MetricsPanel } from "@/components/metrics-panel"
 import type {
   ConnectionState,
-  IceConnectionStateValue,
   PeerConnectionStateValue,
   SelectedDevices,
 } from "@/hooks/use-webrtc"
-import type { TranscriptMessage } from "@/hooks/use-transcript"
 import type {
-  DebugConnectionState,
   DebugEvent,
-} from "@/hooks/use-session-debug"
+  MetricPoint,
+  StreamConnectionState,
+  TranscriptMessage,
+} from "@/hooks/use-room-stream"
 
 interface RoomPageProps {
   localStream: MediaStream | null
@@ -28,12 +29,12 @@ interface RoomPageProps {
   participantId: string | null
   connectionState: ConnectionState
   peerConnectionState: PeerConnectionStateValue
-  iceConnectionState: IceConnectionStateValue
-  debugStatus: DebugConnectionState
-  devices: MediaDeviceInfo[]
+  streamStatus: StreamConnectionState
   selectedDevices: SelectedDevices
   debugEvents: DebugEvent[]
   transcript: TranscriptMessage[]
+  metrics: MetricPoint[]
+  latestByStage: Record<string, Record<string, MetricPoint>>
   onClearEvents: () => void
   isMicOn: boolean
   isCameraOn: boolean
@@ -46,15 +47,14 @@ export function RoomPage({
   localStream,
   remoteStream,
   roomId,
-  participantId,
   connectionState,
   peerConnectionState,
-  iceConnectionState,
-  debugStatus,
-  devices,
+  streamStatus,
   selectedDevices,
   debugEvents,
   transcript,
+  metrics,
+  latestByStage,
   onClearEvents,
   isMicOn,
   isCameraOn,
@@ -93,7 +93,7 @@ export function RoomPage({
         </div>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_16rem] gap-2 px-2 pt-2 pb-4 xl:grid-cols-[18rem_minmax(0,1fr)_20rem] xl:grid-rows-[minmax(0,1fr)_16rem]">
+      <main className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_16rem] gap-2 px-2 pt-2 pb-4 xl:grid-cols-[18rem_minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)_16rem]">
         <section className="grid min-h-0 gap-2 lg:grid-cols-2 xl:grid-cols-1">
           <Panel title="USER VIDEO" detail={isMicOn ? "MIC LIVE" : "MIC MUTED"}>
             <div className="space-y-3">
@@ -124,18 +124,17 @@ export function RoomPage({
           <TranscriptPanel transcript={transcript} connectionState={connectionState} />
         </Panel>
 
-        <SessionPanel
-          roomId={roomId}
-          participantId={participantId}
-          connectionState={connectionState}
-          peerConnectionState={peerConnectionState}
-          iceConnectionState={iceConnectionState}
-          debugStatus={debugStatus}
-          devices={devices}
-          selectedDevices={selectedDevices}
-          isMicOn={isMicOn}
-          isCameraOn={isCameraOn}
-        />
+        <section className="flex min-h-0 flex-col gap-2">
+          <SessionPanel
+            roomId={roomId}
+            connectionState={connectionState}
+            peerConnectionState={peerConnectionState}
+            streamStatus={streamStatus}
+            selectedDevices={selectedDevices}
+            isMicOn={isMicOn}
+          />
+          <MetricsPanel metrics={metrics} latestByStage={latestByStage} />
+        </section>
 
         <Panel
           title="EVENTS"
@@ -297,79 +296,63 @@ function TranscriptPanel({
 
 function SessionPanel({
   roomId,
-  participantId,
   connectionState,
   peerConnectionState,
-  iceConnectionState,
-  debugStatus,
-  devices,
+  streamStatus,
   selectedDevices,
   isMicOn,
-  isCameraOn,
-}: Pick<
-  RoomPageProps,
-  | "roomId"
-  | "participantId"
-  | "connectionState"
-  | "peerConnectionState"
-  | "iceConnectionState"
-  | "debugStatus"
-  | "devices"
-  | "selectedDevices"
-  | "isMicOn"
-  | "isCameraOn"
->) {
-  const deviceCounts = useMemo(
-    () => ({
-      audioinput: devices.filter((device) => device.kind === "audioinput").length,
-      videoinput: devices.filter((device) => device.kind === "videoinput").length,
-      audiooutput: devices.filter((device) => device.kind === "audiooutput").length,
-    }),
-    [devices]
-  )
+}: {
+  roomId: string | null
+  connectionState: ConnectionState
+  peerConnectionState: PeerConnectionStateValue
+  streamStatus: StreamConnectionState
+  selectedDevices: SelectedDevices
+  isMicOn: boolean
+}) {
+  const combinedState = useMemo(() => {
+    if (
+      connectionState === "failed" ||
+      peerConnectionState === "failed" ||
+      streamStatus === "failed"
+    ) {
+      return "failed"
+    }
+    if (
+      connectionState === "connected" &&
+      peerConnectionState === "connected" &&
+      streamStatus === "connected"
+    ) {
+      return "connected"
+    }
+    if (
+      connectionState === "connecting" ||
+      peerConnectionState === "connecting" ||
+      streamStatus === "connecting"
+    ) {
+      return "connecting"
+    }
+    return "idle"
+  }, [connectionState, peerConnectionState, streamStatus])
 
   return (
-    <Panel title="SESSION" detail="LIVE STATE" className="min-h-0" bodyClassName="min-h-0">
-      <div className="h-full min-h-0 overflow-y-auto">
-        <div className="space-y-3">
-          <StatusRow label="CLIENT" value={labelForState(connectionState)} />
-          <StatusRow label="AGENT" value={agentStateLabel(peerConnectionState)} />
-          <StatusRow label="DEBUG WS" value={labelForState(debugStatus)} />
-          <Divider />
-          <InfoRow label="MICROPHONE" value={selectedDevices.audioInput} />
-          <InfoRow label="CAMERA" value={selectedDevices.videoInput} />
-          <InfoRow label="AUDIO OUTPUT" value={selectedDevices.audioOutput} />
-          <InfoRow
-            label="DEVICE COUNTS"
-            value={`${deviceCounts.audioinput} mic / ${deviceCounts.videoinput} camera / ${deviceCounts.audiooutput} output`}
-          />
-          <Divider />
-          <InfoRow label="TRANSPORT" value="WebRTC + WebSocket debug" />
-          <InfoRow label="SESSION ID" value={shortId(roomId)} title={roomId ?? ""} />
-          <InfoRow
-            label="PARTICIPANT ID"
-            value={shortId(participantId)}
-            title={participantId ?? ""}
-          />
-          <InfoRow label="CONNECTION" value={peerConnectionState} />
-          <InfoRow label="ICE" value={iceConnectionState} />
-          <InfoRow label="MIC TRACK" value={isMicOn ? "enabled" : "muted"} />
-          <InfoRow label="CAMERA TRACK" value={isCameraOn ? "enabled" : "off"} />
+    <Panel title="SESSION" detail="LIVE" className="shrink-0" bodyClassName="p-2">
+      <div className="space-y-2.5">
+        <InfoRow label="ROOM ID" value={shortId(roomId)} title={roomId ?? ""} />
+        <InfoRow
+          label="MICROPHONE"
+          value={`${isMicOn ? "live" : "muted"} · ${selectedDevices.audioInput || "default"}`}
+        />
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[9px] tracking-wider text-white/25 uppercase">
+            Connection
+          </span>
+          <span className="flex items-center gap-2 text-[10px] font-medium tracking-wider text-white/60 uppercase">
+            <StatusDot state={combinedState} />
+            {combinedState}
+          </span>
         </div>
       </div>
     </Panel>
-  )
-}
-
-function StatusRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-[10px] tracking-wider text-white/40">{label}</span>
-      <span className="flex items-center gap-2 text-[10px] font-medium tracking-wider text-white/60">
-        <StatusDot state={value} />
-        {value.toUpperCase()}
-      </span>
-    </div>
   )
 }
 
@@ -392,10 +375,6 @@ function InfoRow({
       </div>
     </div>
   )
-}
-
-function Divider() {
-  return <div className="h-px bg-[#1a1a1a]" />
 }
 
 function EventLogPanel({
@@ -547,13 +526,6 @@ function labelForState(state: string) {
   if (state === "disconnected") return "disconnected"
   if (state === "failed") return "failed"
   return state
-}
-
-function agentStateLabel(peerState: PeerConnectionStateValue) {
-  if (peerState === "connected") return "connected"
-  if (peerState === "connecting" || peerState === "new") return "connecting"
-  if (peerState === "failed" || peerState === "closed") return "failed"
-  return "idle"
 }
 
 function shortId(value: string | null) {

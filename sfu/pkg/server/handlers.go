@@ -83,7 +83,7 @@ func (s *Server) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleRoomDebug(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRoomStream(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		setCORS(w)
 		w.WriteHeader(http.StatusNoContent)
@@ -96,23 +96,7 @@ func (s *Server) handleRoomDebug(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.rooms.Debug().ServeWS(w, r, roomId)
-}
-
-func (s *Server) handleRoomTranscript(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		setCORS(w)
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	roomId := r.PathValue("id")
-	if _, ok := s.rooms.Get(roomId); !ok {
-		http.Error(w, "room not found", http.StatusNotFound)
-		return
-	}
-
-	s.rooms.Transcript().ServeWS(w, r, roomId)
+	s.rooms.Stream().ServeWS(w, r, roomId)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

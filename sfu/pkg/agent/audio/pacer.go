@@ -42,6 +42,8 @@ type FramePacer struct {
 	clear  chan struct{}
 	roomID string
 
+	onPlayoutStarted func(bufferedMs int)
+
 	badRateOnce sync.Once
 }
 
@@ -56,6 +58,10 @@ func NewFramePacer(in <-chan Frame, buf int, roomID string) *FramePacer {
 }
 
 func (p *FramePacer) Out() <-chan Frame { return p.out }
+
+func (p *FramePacer) SetOnPlayoutStarted(fn func(bufferedMs int)) {
+	p.onPlayoutStarted = fn
+}
 
 // WaitForDrain blocks until all currently-buffered audio has been emitted to the
 // output. Returns early if ctx is cancelled.
@@ -202,6 +208,9 @@ func (p *FramePacer) Run(ctx context.Context) {
 					"room", p.roomID,
 					"buffered_ms", bufferedMs,
 				)
+				if p.onPlayoutStarted != nil {
+					p.onPlayoutStarted(bufferedMs)
+				}
 			}
 			if !playing {
 				wasPlay = false

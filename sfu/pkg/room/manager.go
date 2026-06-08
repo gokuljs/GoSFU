@@ -6,40 +6,37 @@ import (
 
 	"github.com/gokuljs/goSfu/pkg/config"
 	"github.com/gokuljs/goSfu/pkg/logger"
-	"github.com/gokuljs/goSfu/pkg/sessiondebug"
-	"github.com/gokuljs/goSfu/pkg/transcript"
+	"github.com/gokuljs/goSfu/pkg/roomstream"
 	"github.com/google/uuid"
 )
 
 type Manager struct {
-	rooms       map[string]*Room
-	mu          sync.RWMutex
-	audioPath   string
-	debug       *sessiondebug.Hub
-	transcripts *transcript.Hub
+	rooms     map[string]*Room
+	mu        sync.RWMutex
+	audioPath string
+	stream    *roomstream.Hub
 }
 
 func NewManager() *Manager {
-	debug := sessiondebug.NewHub()
-	logger.SetPipelineSink(debug.PublishPipeline)
+	stream := roomstream.NewHub()
+	logger.SetPipelineSink(stream.PublishPipeline)
 	return &Manager{
-		rooms:       make(map[string]*Room),
-		audioPath:   config.DEFAULT_AUDIO_SAMPLE_FILE,
-		debug:       debug,
-		transcripts: transcript.NewHub(),
+		rooms:     make(map[string]*Room),
+		audioPath: config.DEFAULT_AUDIO_SAMPLE_FILE,
+		stream:    stream,
 	}
 }
 
 func (m *Manager) Create() string {
 	id := uuid.New().String()
-	room := NewRoom(id, m.debug, m.transcripts, func(roomCloseId string) {
+	room := NewRoom(id, m.stream, func(roomCloseId string) {
 		m.Delete(roomCloseId)
 	})
 	m.mu.Lock()
 	m.rooms[id] = room
 	m.mu.Unlock()
 	slog.Info("room created", "room", id)
-	m.debug.PublishEvent(id, "session.room.created", "info", "Room created", nil)
+	m.stream.PublishEvent(id, "session.room.created", "info", "Room created", nil)
 	return id
 }
 
@@ -50,12 +47,8 @@ func (m *Manager) Get(id string) (*Room, bool) {
 	return room, ok
 }
 
-func (m *Manager) Debug() *sessiondebug.Hub {
-	return m.debug
-}
-
-func (m *Manager) Transcript() *transcript.Hub {
-	return m.transcripts
+func (m *Manager) Stream() *roomstream.Hub {
+	return m.stream
 }
 
 func (m *Manager) Delete(id string) {
@@ -63,5 +56,5 @@ func (m *Manager) Delete(id string) {
 	defer m.mu.Unlock()
 	delete(m.rooms, id)
 	slog.Info("room deleted", "room", id)
-	m.debug.PublishEvent(id, "session.room.deleted", "info", "Room deleted", nil)
+	m.stream.PublishEvent(id, "session.room.deleted", "info", "Room deleted", nil)
 }

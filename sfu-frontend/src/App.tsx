@@ -10,8 +10,7 @@ import {
 import { LandingPage } from "@/pages/landing"
 import { RoomPage } from "@/pages/room"
 import { SFU_URL, useWebRTC } from "@/hooks/use-webrtc"
-import { useSessionDebug } from "@/hooks/use-session-debug"
-import { useTranscript } from "@/hooks/use-transcript"
+import { useRoomStream } from "@/hooks/use-room-stream"
 
 type WebRTCContextValue = ReturnType<typeof useWebRTC>
 
@@ -53,7 +52,6 @@ function RoomRoute() {
     connectionState,
     peerConnectionState,
     iceConnectionState,
-    devices,
     selectedDevices,
     connect,
     disconnect,
@@ -63,9 +61,8 @@ function RoomRoute() {
     isCameraOn,
   } = useWebRTCContext()
   const activeRoomId = roomId ?? routeRoomId ?? null
-  const debug = useSessionDebug(activeRoomId, SFU_URL)
-  const transcript = useTranscript(activeRoomId, SFU_URL)
-  const { addLocalEvent } = debug
+  const stream = useRoomStream(activeRoomId, SFU_URL)
+  const { addLocalEvent } = stream
 
   useEffect(() => {
     if (!routeRoomId) return
@@ -128,13 +125,13 @@ function RoomRoute() {
       participantId={participantId}
       connectionState={connectionState}
       peerConnectionState={peerConnectionState}
-      iceConnectionState={iceConnectionState}
-      debugStatus={debug.status}
-      devices={devices}
+      streamStatus={stream.status}
       selectedDevices={selectedDevices}
-      debugEvents={debug.events}
-      transcript={transcript.transcript}
-      onClearEvents={debug.clearEvents}
+      debugEvents={stream.debugEvents}
+      transcript={stream.transcript}
+      metrics={stream.metrics}
+      latestByStage={stream.latestByStage}
+      onClearEvents={stream.clearEvents}
       isMicOn={isMicOn}
       isCameraOn={isCameraOn}
       onToggleMic={toggleMic}

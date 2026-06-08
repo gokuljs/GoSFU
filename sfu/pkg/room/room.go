@@ -9,8 +9,7 @@ import (
 	"github.com/gokuljs/goSfu/pkg/agent"
 	"github.com/gokuljs/goSfu/pkg/agent/transport"
 	"github.com/gokuljs/goSfu/pkg/config"
-	"github.com/gokuljs/goSfu/pkg/sessiondebug"
-	"github.com/gokuljs/goSfu/pkg/transcript"
+	"github.com/gokuljs/goSfu/pkg/roomstream"
 	"github.com/gokuljs/goSfu/pkg/sfu"
 	"github.com/google/uuid"
 	"github.com/pion/webrtc/v4"
@@ -46,8 +45,7 @@ type Room struct {
 	cancel       context.CancelFunc
 	pc           *webrtc.PeerConnection
 	agent        *agent.Agent
-	debug        *sessiondebug.Hub
-	transcripts  *transcript.Hub
+	stream       *roomstream.Hub
 }
 type JoinResult struct {
 	Sdp           webrtc.SessionDescription `json:"sdp"`
@@ -55,7 +53,7 @@ type JoinResult struct {
 	RoomId        string                    `json:"roomId"`
 }
 
-func NewRoom(id string, debug *sessiondebug.Hub, transcripts *transcript.Hub, onClose func(string)) *Room {
+func NewRoom(id string, stream *roomstream.Hub, onClose func(string)) *Room {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Room{
 		Id:           id,
@@ -65,8 +63,7 @@ func NewRoom(id string, debug *sessiondebug.Hub, transcripts *transcript.Hub, on
 		ctx:          ctx,
 		cancel:       cancel,
 		onClose:      onClose,
-		debug:        debug,
-		transcripts:  transcripts,
+		stream:       stream,
 	}
 }
 
@@ -86,7 +83,7 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 		Name:   "",
 		Active: true,
 	})
-	r.debug.PublishEvent(r.Id, "session.participant.joined", "info", "Participant joined", map[string]any{
+	r.stream.PublishEvent(r.Id, "session.participant.joined", "info", "Participant joined", map[string]any{
 		"participant_id": participantId,
 	})
 
@@ -116,7 +113,8 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 		return nil, err
 	}
 	cfg.RoomID = r.Id
-	cfg.TranscriptPublisher = r.transcripts
+	cfg.TranscriptPublisher = r.stream
+	cfg.MetricsPublisher = r.stream
 
 	ag := agent.New(r.ctx, tr, cfg)
 	r.agent = ag
@@ -127,7 +125,7 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 			"kind", track.Kind().String(),
 			"codec", track.Codec().MimeType,
 		)
-		r.debug.PublishEvent(r.Id, "media.track.started", "info", "Track started", map[string]any{
+		r.stream.PublishEvent(r.Id, "media.track.started", "info", "Track started", map[string]any{
 			"kind":       track.Kind().String(),
 			"codec":      track.Codec().MimeType,
 			"clock_rate": track.Codec().ClockRate,
@@ -143,7 +141,7 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 	var agentStarted sync.Once
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		slog.Info("pc state", "room", r.Id, "state", state.String())
-		r.debug.PublishEvent(r.Id, "transport.peer_connection.state", "info", "Peer connection state changed", map[string]any{
+		r.stream.PublishEvent(r.Id, "transport.peer_connection.state", "info", "Peer connection state changed", map[string]any{
 			"state": state.String(),
 		})
 		if state == webrtc.PeerConnectionStateConnected {
@@ -177,7 +175,7 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 	<-gatherComplete
 	r.State = StateActive
 	slog.Info("room active", "room", r.Id, "participant", participantId)
-	r.debug.PublishEvent(r.Id, "session.room.active", "info", "Room active", map[string]any{
+	r.stream.PublishEvent(r.Id, "session.room.active", "info", "Room active", map[string]any{
 		"participant_id": participantId,
 	})
 	return &JoinResult{
@@ -197,7 +195,7 @@ func (r *Room) drainTrack(track *webrtc.TrackRemote) {
 		default:
 		}
 		if _, _, err := track.Read(buf); err != nil {
-			r.debug.PublishEvent(r.Id, "media.track.stopped", "info", "Track stopped", map[string]any{
+			r.stream.PublishEvent(r.Id, "media.track.stopped", "info", "Track stopped", map[string]any{
 				"kind":  track.Kind().String(),
 				"codec": track.Codec().MimeType,
 				"error": err.Error(),
@@ -235,5 +233,5 @@ func (r *Room) cleanupLocked() {
 		r.Participants[i].Active = false
 	}
 	slog.Info("room closed", "room", r.Id)
-	r.debug.PublishEvent(r.Id, "session.room.closed", "info", "Room closed", nil)
+	r.stream.PublishEvent(r.Id, "session.room.closed", "info", "Room closed", nil)
 }
