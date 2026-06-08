@@ -16,7 +16,7 @@ import (
 	"github.com/gokuljs/goSfu/plugins/llm"
 )
 
-const defaultModel = "gpt-4o-mini"
+const defaultModel = "gpt-5.5"
 const defaultBaseURL = "https://api.openai.com/v1"
 
 func init() {

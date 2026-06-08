@@ -30,6 +30,7 @@ func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := s.rooms.Create()
+	slog.Info("room create requested", "room", id)
 	writeJSON(w, http.StatusOK, createRoomResponse{RoomID: id})
 }
 
@@ -43,6 +44,7 @@ func (s *Server) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 	roomId := r.PathValue("id")
 	rm, ok := s.rooms.Get(roomId)
 	if !ok {
+		slog.Warn("join rejected", "room", roomId, "reason", "not_found")
 		http.Error(w, "room not found", http.StatusNotFound)
 		return
 	}
@@ -57,8 +59,10 @@ func (s *Server) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch err {
 		case room.ErrRoomFull:
+			slog.Warn("join rejected", "room", roomId, "reason", "room_full")
 			http.Error(w, "room full", http.StatusConflict)
 		case room.ErrRoomClosed:
+			slog.Warn("join rejected", "room", roomId, "reason", "room_closed")
 			http.Error(w, "room closed", http.StatusGone)
 		default:
 			slog.Error("join failed", "room", roomId, "error", err)
@@ -67,11 +71,48 @@ func (s *Server) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("participant joined",
+		"room", roomId,
+		"participant", result.ParticipantId,
+	)
+
 	writeJSON(w, http.StatusOK, joinRoomResponse{
 		Sdp:           result.Sdp,
 		ParticipantId: result.ParticipantId,
 		RoomId:        result.RoomId,
 	})
+}
+
+func (s *Server) handleRoomDebug(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		setCORS(w)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	roomId := r.PathValue("id")
+	if _, ok := s.rooms.Get(roomId); !ok {
+		http.Error(w, "room not found", http.StatusNotFound)
+		return
+	}
+
+	s.rooms.Debug().ServeWS(w, r, roomId)
+}
+
+func (s *Server) handleRoomTranscript(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		setCORS(w)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	roomId := r.PathValue("id")
+	if _, ok := s.rooms.Get(roomId); !ok {
+		http.Error(w, "room not found", http.StatusNotFound)
+		return
+	}
+
+	s.rooms.Transcript().ServeWS(w, r, roomId)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -83,6 +124,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func setCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }

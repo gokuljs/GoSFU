@@ -74,6 +74,13 @@ func (p *Inbound) Run(ctx context.Context, track *webrtc.TrackRemote) {
 		pkt, _, err := track.ReadRTP()
 		if err != nil {
 			slog.Info("inbound audio stopped", "room", p.roomID, "error", err)
+			logger.Pipeline(slog.LevelInfo, "media.track.stopped",
+				"Inbound audio track stopped",
+				"room", p.roomID,
+				"kind", track.Kind().String(),
+				"codec", track.Codec().MimeType,
+				"error", err,
+			)
 			return
 		}
 		if len(pkt.Payload) == 0 {

@@ -27,7 +27,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestProvider_Name(t *testing.T) {
-	p := New(Config{APIKey: "k", Model: "gpt-4o-mini", BaseURL: "http://localhost"})
+	p := New(Config{APIKey: "k", Model: "gpt-5.5", BaseURL: "http://localhost"})
 	if got := p.Name(); got != "openai" {
 		t.Fatalf("Name() = %q, want openai", got)
 	}
@@ -49,7 +49,7 @@ func TestStreamCompletion_streamsDeltas(t *testing.T) {
 		if !req.Stream {
 			t.Fatal("expected stream=true")
 		}
-		if req.Model != "gpt-4o-mini" {
+		if req.Model != "gpt-5.5" {
 			t.Fatalf("model = %q", req.Model)
 		}
 		if req.Temperature == nil || *req.Temperature != 0.5 {
@@ -70,7 +70,7 @@ func TestStreamCompletion_streamsDeltas(t *testing.T) {
 	temp := 0.5
 	p := New(Config{
 		APIKey:      "test-key",
-		Model:       "gpt-4o-mini",
+		Model:       "gpt-5.5",
 		BaseURL:     srv.URL,
 		Temperature: &temp,
 	})
@@ -105,7 +105,7 @@ func TestStreamCompletion_forwardsExtra(t *testing.T) {
 		if req["top_p"] != 0.9 {
 			t.Fatalf("top_p = %v, want 0.9", req["top_p"])
 		}
-		if req["model"] != "gpt-4o-mini" {
+		if req["model"] != "gpt-5.5" {
 			t.Fatalf("typed model field should win over extra: %v", req["model"])
 		}
 
@@ -116,7 +116,7 @@ func TestStreamCompletion_forwardsExtra(t *testing.T) {
 
 	p := New(Config{
 		APIKey:  "test-key",
-		Model:   "gpt-4o-mini",
+		Model:   "gpt-5.5",
 		BaseURL: srv.URL,
 		Extra: map[string]any{
 			"max_tokens": 128,
@@ -141,7 +141,7 @@ func TestStreamCompletion_httpError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := New(Config{APIKey: "bad", Model: "gpt-4o-mini", BaseURL: srv.URL})
+	p := New(Config{APIKey: "bad", Model: "gpt-5.5", BaseURL: srv.URL})
 	_, err := p.StreamCompletion(context.Background(), []llm.Message{
 		{Role: llm.RoleUser, Content: "Hi"},
 	})
@@ -162,7 +162,7 @@ func TestBuild_requiresAPIKey(t *testing.T) {
 		}
 	})
 
-	_, err := llm.Build("openai", llm.Options{Model: "gpt-4o-mini"})
+	_, err := llm.Build("openai", llm.Options{Model: "gpt-5.5"})
 	if err == nil {
 		t.Fatal("expected error when API key is unset")
 	}
@@ -174,7 +174,7 @@ func TestBuild_requiresAPIKey(t *testing.T) {
 func TestBuild_usesExplicitAPIKey(t *testing.T) {
 	p, err := llm.Build("openai", llm.Options{
 		APIKey: "explicit-key",
-		Model:  "gpt-4o-mini",
+		Model:  "gpt-5.5",
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -198,7 +198,7 @@ func TestIntegration_StreamCompletion(t *testing.T) {
 
 	temp := 0.2
 	p, err := llm.Build("openai", llm.Options{
-		Model:       "gpt-4o-mini",
+		Model:       "gpt-5.5",
 		Temperature: &temp,
 	})
 	if err != nil {
