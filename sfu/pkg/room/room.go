@@ -87,7 +87,7 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 	}
 	r.pc = pc
 
-	tr, err := transport.NewWebrtc(pc)
+	tr, err := transport.NewWebrtc(pc, r.Id)
 	if err != nil {
 		r.cleanupLocked()
 		return nil, err
@@ -106,6 +106,7 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription) (*JoinResult, error) 
 		r.cleanupLocked()
 		return nil, err
 	}
+	cfg.RoomID = r.Id
 
 	ag := agent.New(r.ctx, tr, cfg)
 	r.agent = ag

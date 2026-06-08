@@ -8,14 +8,16 @@ import (
 type Env string
 
 const (
-	Dev  Env = "development"
-	Prod Env = "production"
+	Local Env = "local"
+	Dev   Env = "development"
+	Prod  Env = "production"
 )
 
 // Init configures the global slog logger based on the environment.
-// Both modes output JSON (compatible with Grafana/Loki/Datadog).
-// Dev mode: Debug level, source on all logs.
-// Prod mode: Info level, source on all logs (needed for debugging in production).
+//
+//   - local: colorful human-readable text (default for local dev)
+//   - development: JSON, Debug level, source lines (Grafana/Loki)
+//   - production: JSON, Info level, source lines (Grafana/Loki)
 func Init(env Env) *slog.Logger {
 	var handler slog.Handler
 
@@ -25,10 +27,14 @@ func Init(env Env) *slog.Logger {
 			Level:     slog.LevelInfo,
 			AddSource: true,
 		})
-	default:
+	case Dev:
 		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 			Level:     slog.LevelDebug,
 			AddSource: true,
+		})
+	default:
+		handler = NewColorTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
 		})
 	}
 
@@ -42,7 +48,11 @@ func EnvFromString(s string) Env {
 	switch s {
 	case "production", "prod":
 		return Prod
-	default:
+	case "development", "dev":
 		return Dev
+	case "local", "":
+		return Local
+	default:
+		return Local
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gokuljs/goSfu/pkg/agent/audio"
+	"github.com/gokuljs/goSfu/pkg/logger"
 	"github.com/gokuljs/goSfu/plugins/stt"
 )
 
@@ -175,8 +177,22 @@ func (s *session) readLoop(ctx context.Context) {
 		}
 		alt := msg.Channel.Alternatives[0]
 		if alt.Transcript == "" {
+			logger.Pipeline(slog.LevelDebug, logger.EventSTTEmptyResult,
+				"Deepgram result with empty transcript",
+				"is_final", msg.IsFinal,
+				"speech_final", msg.SpeechFinal,
+				"confidence", alt.Confidence,
+			)
 			continue
 		}
+		logger.Pipeline(slog.LevelDebug, logger.EventSTTResult,
+			"Deepgram transcript result",
+			"is_final", msg.IsFinal,
+			"speech_final", msg.SpeechFinal,
+			"confidence", alt.Confidence,
+			"text_len", len(alt.Transcript),
+			"text_preview", logger.Preview(alt.Transcript, 80),
+		)
 
 		select {
 		case s.results <- stt.Result{
@@ -191,9 +207,10 @@ func (s *session) readLoop(ctx context.Context) {
 }
 
 type dgMessage struct {
-	Type    string `json:"type"`
-	IsFinal bool   `json:"is_final"`
-	Channel *struct {
+	Type        string `json:"type"`
+	IsFinal     bool   `json:"is_final"`
+	SpeechFinal bool   `json:"speech_final"`
+	Channel     *struct {
 		Alternatives []struct {
 			Transcript string  `json:"transcript"`
 			Confidence float64 `json:"confidence"`
