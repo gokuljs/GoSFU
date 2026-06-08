@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 const MAX_DEBUG_EVENTS = 600
+const DEBUG_EVENT_FLUSH_MS = 300
 const MAX_METRIC_POINTS = 400
 const METRICS_DEBUG = import.meta.env.DEV
 
@@ -123,9 +124,38 @@ export function useRoomStream(
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([])
   const [metrics, setMetrics] = useState<MetricPoint[]>([])
   const [status, setStatus] = useState<StreamConnectionState>("idle")
+  const pendingDebugEventsRef = useRef<DebugEvent[]>([])
+  const flushTimerRef = useRef<number | null>(null)
 
-  const addDebugEvent = useCallback((event: DebugEvent) => {
-    setDebugEvents((current) => [...current, event].slice(-MAX_DEBUG_EVENTS))
+  const flushDebugEvents = useCallback(() => {
+    if (pendingDebugEventsRef.current.length === 0) return
+    const batch = pendingDebugEventsRef.current
+    pendingDebugEventsRef.current = []
+    setDebugEvents((current) => [...current, ...batch].slice(-MAX_DEBUG_EVENTS))
+  }, [])
+
+  const scheduleDebugFlush = useCallback(() => {
+    if (flushTimerRef.current !== null) return
+    flushTimerRef.current = window.setTimeout(() => {
+      flushTimerRef.current = null
+      flushDebugEvents()
+    }, DEBUG_EVENT_FLUSH_MS)
+  }, [flushDebugEvents])
+
+  const addDebugEvent = useCallback(
+    (event: DebugEvent) => {
+      pendingDebugEventsRef.current.push(event)
+      scheduleDebugFlush()
+    },
+    [scheduleDebugFlush]
+  )
+
+  const clearPendingDebugEvents = useCallback(() => {
+    pendingDebugEventsRef.current = []
+    if (flushTimerRef.current !== null) {
+      window.clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = null
+    }
   }, [])
 
   const addLocalEvent = useCallback(
@@ -181,8 +211,19 @@ export function useRoomStream(
   }, [])
 
   useEffect(() => {
+    return () => {
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current)
+        flushTimerRef.current = null
+      }
+      flushDebugEvents()
+    }
+  }, [flushDebugEvents])
+
+  useEffect(() => {
     if (!roomId) {
       const timeout = window.setTimeout(() => {
+        clearPendingDebugEvents()
         setStatus("idle")
         setTranscript([])
         setDebugEvents([])
@@ -242,8 +283,22 @@ export function useRoomStream(
     return () => {
       window.clearTimeout(timeout)
       ws.close()
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current)
+        flushTimerRef.current = null
+      }
+      flushDebugEvents()
     }
-  }, [addDebugEvent, addLocalEvent, applyMetric, applyTranscript, roomId, sfuUrl])
+  }, [
+    addDebugEvent,
+    addLocalEvent,
+    applyMetric,
+    applyTranscript,
+    clearPendingDebugEvents,
+    flushDebugEvents,
+    roomId,
+    sfuUrl,
+  ])
 
   const latestByStage = useMemo(() => {
     const result: Record<string, Record<string, MetricPoint>> = {
@@ -265,7 +320,10 @@ export function useRoomStream(
     metrics,
     latestByStage,
     addLocalEvent,
-    clearEvents: useCallback(() => setDebugEvents([]), []),
+    clearEvents: useCallback(() => {
+      clearPendingDebugEvents()
+      setDebugEvents([])
+    }, [clearPendingDebugEvents]),
   }
 }
 

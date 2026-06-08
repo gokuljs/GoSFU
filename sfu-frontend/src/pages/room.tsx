@@ -5,7 +5,14 @@ import {
   VideoCameraSlash,
   PhoneDisconnect,
 } from "@phosphor-icons/react"
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { VideoTile } from "@/components/video-tile"
 import { LiveWaveform } from "@/components/ui/live-waveform"
 import { Button } from "@/components/ui/button"
@@ -21,6 +28,7 @@ import type {
   StreamConnectionState,
   TranscriptMessage,
 } from "@/hooks/use-room-stream"
+import { formatLocalTime } from "@/lib/format-time"
 
 interface RoomPageProps {
   localStream: MediaStream | null
@@ -282,7 +290,7 @@ function TranscriptPanel({
             <div className="mb-1.5 flex items-center gap-2 text-[9px] uppercase tracking-wider text-white/30">
               <span>{item.speaker === "user" ? "USER" : "BOT"}</span>
               {item.turn !== undefined && <span>TURN {item.turn}</span>}
-              <span>{formatTime(item.ts)}</span>
+              <span>{formatLocalTime(item.ts)}</span>
               {item.interim && <span className="text-[#00d4aa]">INTERIM</span>}
             </div>
             <p className="text-[11px] leading-5 text-white/70">{item.text}</p>
@@ -389,26 +397,48 @@ function EventLogPanel({
   const [query, setQuery] = useState("")
   const [paused, setPaused] = useState(false)
   const [pausedEvents, setPausedEvents] = useState<DebugEvent[]>([])
+  const [categories, setCategories] = useState<string[]>([])
+  const listRef = useRef<HTMLDivElement>(null)
+  const pinnedToTopRef = useRef(true)
+  const knownCategoriesRef = useRef(new Set<string>())
   const displayEvents = paused ? pausedEvents : events
 
-  const categories = useMemo(
-    () => Array.from(new Set(events.map((event) => event.category))).sort(),
-    [events]
-  )
+  useEffect(() => {
+    if (events.length === 0) {
+      knownCategoriesRef.current.clear()
+      setCategories([])
+      return
+    }
+
+    let changed = false
+    for (const event of events) {
+      if (!knownCategoriesRef.current.has(event.category)) {
+        knownCategoriesRef.current.add(event.category)
+        changed = true
+      }
+    }
+    if (changed) {
+      setCategories(Array.from(knownCategoriesRef.current).sort())
+    }
+  }, [events])
 
   const filteredEvents = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
-    return displayEvents
-      .filter((event) => category === "all" || event.category === category)
-      .filter((event) => level === "all" || event.level === level)
-      .filter((event) => {
-        if (!normalizedQuery) return true
-        return `${event.type} ${event.message} ${JSON.stringify(event.attrs ?? {})}`
-          .toLowerCase()
-          .includes(normalizedQuery)
-      })
-      .slice(-180)
+    const matches = displayEvents.filter((event) => {
+      if (category !== "all" && event.category !== category) return false
+      if (level !== "all" && event.level !== level) return false
+      if (!normalizedQuery) return true
+      return `${event.type} ${event.message} ${JSON.stringify(event.attrs ?? {})}`
+        .toLowerCase()
+        .includes(normalizedQuery)
+    })
+    return matches.slice(-180).reverse()
   }, [category, displayEvents, level, query])
+
+  useEffect(() => {
+    if (paused || !pinnedToTopRef.current || !listRef.current) return
+    listRef.current.scrollTop = 0
+  }, [filteredEvents, paused])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
@@ -461,13 +491,25 @@ function EventLogPanel({
           variant="outline"
           size="sm"
           className="h-6 border-[#1a1a1a] bg-[#050505] text-[10px] tracking-wider text-white/50 hover:border-[#00d4aa]/30 hover:text-[#00d4aa]"
-          onClick={onClearEvents}
+          onClick={() => {
+            knownCategoriesRef.current.clear()
+            setCategories([])
+            pinnedToTopRef.current = true
+            onClearEvents()
+          }}
         >
           CLEAR
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto border border-[#1a1a1a] bg-[#050505]">
+      <div
+        ref={listRef}
+        onScroll={() => {
+          if (!listRef.current) return
+          pinnedToTopRef.current = listRef.current.scrollTop < 8
+        }}
+        className="min-h-0 flex-1 overflow-y-auto border border-[#1a1a1a] bg-[#050505]"
+      >
         {filteredEvents.length === 0 ? (
           <div className="flex h-full items-center justify-center text-[10px] tracking-wider text-white/25 uppercase">
             No events match the current filters.
@@ -484,10 +526,10 @@ function EventLogPanel({
   )
 }
 
-function EventRow({ event }: { event: DebugEvent }) {
+const EventRow = memo(function EventRow({ event }: { event: DebugEvent }) {
   return (
     <div className="grid grid-cols-[4rem_4rem_9rem_minmax(0,1fr)] gap-3 px-3 py-1.5 text-[10px]">
-      <span className="font-mono text-white/25">{formatTime(event.ts)}</span>
+      <span className="font-mono text-white/25">{formatLocalTime(event.ts)}</span>
       <span className={levelClass(event.level)}>{event.level.toUpperCase()}</span>
       <span className="truncate font-mono text-[#00d4aa]/50" title={event.type}>
         {event.type}
@@ -502,7 +544,7 @@ function EventRow({ event }: { event: DebugEvent }) {
       </div>
     </div>
   )
-}
+})
 
 function StatusDot({ state }: { state: string }) {
   const tone =
@@ -532,14 +574,6 @@ function shortId(value: string | null) {
   if (!value) return "Unavailable"
   if (value.length <= 12) return value
   return `${value.slice(0, 8)}...${value.slice(-4)}`
-}
-
-function formatTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(value))
 }
 
 function levelClass(level: DebugEvent["level"]) {
