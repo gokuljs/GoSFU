@@ -5,7 +5,7 @@ import {
   VideoCameraSlash,
   PhoneDisconnect,
 } from "@phosphor-icons/react"
-import { useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { VideoTile } from "@/components/video-tile"
 import { LiveWaveform } from "@/components/ui/live-waveform"
 import { Button } from "@/components/ui/button"
@@ -63,7 +63,7 @@ export function RoomPage({
   onDisconnect,
 }: RoomPageProps) {
   return (
-    <div className="flex min-h-svh flex-col bg-[#050506] text-white">
+    <div className="flex h-svh flex-col overflow-hidden bg-[#050506] text-white">
       <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
         <div className="flex items-center gap-2">
           <StatusDot state={connectionState} />
@@ -85,7 +85,7 @@ export function RoomPage({
         </div>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_18rem] gap-2 p-2 xl:grid-cols-[18rem_minmax(0,1fr)_20rem]">
+      <main className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_16rem] gap-2 px-2 pt-2 pb-4 xl:grid-cols-[18rem_minmax(0,1fr)_20rem] xl:grid-rows-[minmax(0,1fr)_16rem]">
         <section className="grid min-h-0 gap-2 lg:grid-cols-2 xl:grid-cols-1">
           <Panel title="User Video" detail={isMicOn ? "Mic live" : "Mic muted"}>
             <div className="space-y-3">
@@ -220,7 +220,11 @@ function Panel({
         </h2>
         {detail && <span className="text-[11px] text-white/35">{detail}</span>}
       </div>
-      <div className={`flex-1 p-3 ${bodyClassName}`}>{children}</div>
+      <div
+        className={`flex min-h-0 flex-1 flex-col overflow-hidden p-3 ${bodyClassName}`}
+      >
+        {children}
+      </div>
     </section>
   )
 }
@@ -232,11 +236,17 @@ function TranscriptPanel({
   transcript: TranscriptMessage[]
   connectionState: ConnectionState
 }) {
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end" })
+  }, [transcript])
+
   if (transcript.length === 0) {
     return (
-      <div className="flex h-full min-h-64 items-center justify-center rounded-lg border border-dashed border-white/10 bg-black/20 px-6 text-center">
+      <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-white/10 bg-black/20 px-6 text-center">
         <div>
-          <p className="text-sm font-medium text-white/70">
+          <p className="text-xs font-medium text-white/70">
             {connectionState === "connected" || connectionState === "connecting"
               ? "Waiting for live transcript"
               : "Connect a session to start the transcript"}
@@ -251,25 +261,28 @@ function TranscriptPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto pr-1">
-      {transcript.map((item) => (
-        <article
-          key={item.id}
-          className={`max-w-[82%] rounded-2xl border px-4 py-3 ${
-            item.speaker === "user"
-              ? "self-start border-violet-400/20 bg-violet-500/10"
-              : "self-end border-emerald-400/20 bg-emerald-500/10"
-          }`}
-        >
-          <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-wide text-white/35">
-            <span>{item.speaker === "user" ? "User" : "Bot"}</span>
-            {item.turn !== undefined && <span>Turn {item.turn}</span>}
-            <span>{formatTime(item.ts)}</span>
-            {item.interim && <span className="text-violet-200">Interim</span>}
-          </div>
-          <p className="text-sm leading-6 text-white/85">{item.text}</p>
-        </article>
-      ))}
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+        {transcript.map((item) => (
+          <article
+            key={item.id}
+            className={`max-w-[82%] rounded-2xl border px-3 py-2 ${
+              item.speaker === "user"
+                ? "self-start border-violet-400/20 bg-violet-500/10"
+                : "self-end border-emerald-400/20 bg-emerald-500/10"
+            }`}
+          >
+            <div className="mb-1.5 flex items-center gap-2 text-[10px] uppercase tracking-wide text-white/35">
+              <span>{item.speaker === "user" ? "User" : "Bot"}</span>
+              {item.turn !== undefined && <span>Turn {item.turn}</span>}
+              <span>{formatTime(item.ts)}</span>
+              {item.interim && <span className="text-violet-200">Interim</span>}
+            </div>
+            <p className="text-xs leading-5 text-white/85">{item.text}</p>
+          </article>
+        ))}
+        <div ref={bottomRef} aria-hidden />
+      </div>
     </div>
   )
 }
@@ -308,31 +321,33 @@ function SessionPanel({
   )
 
   return (
-    <Panel title="Session" detail="Live state" className="min-h-0">
-      <div className="space-y-4">
-        <StatusRow label="Client" value={labelForState(connectionState)} />
-        <StatusRow label="Agent" value={agentStateLabel(peerConnectionState)} />
-        <StatusRow label="Debug WS" value={labelForState(debugStatus)} />
-        <Divider />
-        <InfoRow label="Microphone" value={selectedDevices.audioInput} />
-        <InfoRow label="Camera" value={selectedDevices.videoInput} />
-        <InfoRow label="Audio Output" value={selectedDevices.audioOutput} />
-        <InfoRow
-          label="Device Counts"
-          value={`${deviceCounts.audioinput} mic / ${deviceCounts.videoinput} camera / ${deviceCounts.audiooutput} output`}
-        />
-        <Divider />
-        <InfoRow label="Transport" value="WebRTC + WebSocket debug" />
-        <InfoRow label="Session ID" value={shortId(roomId)} title={roomId ?? ""} />
-        <InfoRow
-          label="Participant ID"
-          value={shortId(participantId)}
-          title={participantId ?? ""}
-        />
-        <InfoRow label="Connection" value={peerConnectionState} />
-        <InfoRow label="ICE" value={iceConnectionState} />
-        <InfoRow label="Mic Track" value={isMicOn ? "enabled" : "muted"} />
-        <InfoRow label="Camera Track" value={isCameraOn ? "enabled" : "off"} />
+    <Panel title="Session" detail="Live state" className="min-h-0" bodyClassName="min-h-0">
+      <div className="h-full min-h-0 overflow-y-auto pr-1">
+        <div className="space-y-4">
+          <StatusRow label="Client" value={labelForState(connectionState)} />
+          <StatusRow label="Agent" value={agentStateLabel(peerConnectionState)} />
+          <StatusRow label="Debug WS" value={labelForState(debugStatus)} />
+          <Divider />
+          <InfoRow label="Microphone" value={selectedDevices.audioInput} />
+          <InfoRow label="Camera" value={selectedDevices.videoInput} />
+          <InfoRow label="Audio Output" value={selectedDevices.audioOutput} />
+          <InfoRow
+            label="Device Counts"
+            value={`${deviceCounts.audioinput} mic / ${deviceCounts.videoinput} camera / ${deviceCounts.audiooutput} output`}
+          />
+          <Divider />
+          <InfoRow label="Transport" value="WebRTC + WebSocket debug" />
+          <InfoRow label="Session ID" value={shortId(roomId)} title={roomId ?? ""} />
+          <InfoRow
+            label="Participant ID"
+            value={shortId(participantId)}
+            title={participantId ?? ""}
+          />
+          <InfoRow label="Connection" value={peerConnectionState} />
+          <InfoRow label="ICE" value={iceConnectionState} />
+          <InfoRow label="Mic Track" value={isMicOn ? "enabled" : "muted"} />
+          <InfoRow label="Camera Track" value={isCameraOn ? "enabled" : "off"} />
+        </div>
       </div>
     </Panel>
   )
