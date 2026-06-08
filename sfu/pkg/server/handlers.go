@@ -74,6 +74,22 @@ func (s *Server) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleRoomDebug(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		setCORS(w)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	roomId := r.PathValue("id")
+	if _, ok := s.rooms.Get(roomId); !ok {
+		http.Error(w, "room not found", http.StatusNotFound)
+		return
+	}
+
+	s.rooms.Debug().ServeWS(w, r, roomId)
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	setCORS(w)
 	w.Header().Set("Content-Type", "application/json")
@@ -83,6 +99,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func setCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }

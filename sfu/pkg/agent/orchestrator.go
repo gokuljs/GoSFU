@@ -204,6 +204,15 @@ func (o *Orchestrator) onTranscript(ctx context.Context, res stt.Result) {
 		o.interruptResponse(reason)
 	}
 	if !res.IsFinal {
+		logger.Pipeline(slog.LevelDebug, logger.EventTranscriptInterim,
+			"Interim transcript received",
+			"room", o.room(), "turn", o.turn+1,
+			"is_final", res.IsFinal,
+			"confidence", res.Confidence,
+			"text", text,
+			"text_len", len(text),
+			"text_preview", logger.Preview(text, 80),
+		)
 		return
 	}
 	logger.Pipeline(slog.LevelDebug, logger.EventSTTResult,
@@ -211,6 +220,7 @@ func (o *Orchestrator) onTranscript(ctx context.Context, res stt.Result) {
 		"room", o.room(), "turn", o.turn+1,
 		"is_final", res.IsFinal,
 		"confidence", res.Confidence,
+		"text", text,
 		"text_len", len(text),
 		"text_preview", logger.Preview(text, 80),
 	)
@@ -255,6 +265,10 @@ func (o *Orchestrator) startResponse(ctx context.Context, userText string) {
 	o.history = append(o.history, llm.Message{Role: llm.RoleUser, Content: userText})
 	history := append([]llm.Message(nil), o.history...)
 	turn := o.turn
+	logger.Pipeline(slog.LevelInfo, logger.EventAgentResponseStart,
+		"Agent response started",
+		"room", o.room(), "turn", turn,
+	)
 
 	respCtx, cancel := context.WithCancel(ctx)
 	done := make(chan responseResult, 1)
@@ -275,6 +289,11 @@ func (o *Orchestrator) startResponse(ctx context.Context, userText string) {
 func (o *Orchestrator) startGreeting(ctx context.Context, text string) {
 	o.turnStart = time.Now()
 	o.setState(stateResponding)
+	logger.Pipeline(slog.LevelInfo, logger.EventAgentResponseStart,
+		"Agent greeting started",
+		"room", o.room(), "turn", 0,
+		"text", text,
+	)
 
 	respCtx, cancel := context.WithCancel(ctx)
 	done := make(chan responseResult, 1)
@@ -363,6 +382,7 @@ func (o *Orchestrator) runResponse(ctx context.Context, turn int, started time.T
 	logger.Pipeline(slog.LevelInfo, logger.EventLLMComplete,
 		"LLM response complete",
 		"room", o.room(), "turn", turn,
+		"text", full.String(),
 		"text_len", full.Len(),
 		"duration_ms", time.Since(llmStart).Milliseconds(),
 	)
@@ -456,8 +476,15 @@ func (o *Orchestrator) speak(ctx context.Context, turn int, text string) bool {
 
 func (o *Orchestrator) setState(s convState) {
 	if o.state != s {
-		slog.Debug("state change", "room", o.room(), "from", o.state, "to", s)
+		from := o.state
+		slog.Debug("state change", "room", o.room(), "from", from, "to", s)
 		o.state = s
+		logger.Pipeline(slog.LevelInfo, logger.EventAgentStateChanged,
+			"Agent state changed",
+			"room", o.room(), "turn", o.turn,
+			"from", from.String(),
+			"to", s.String(),
+		)
 	}
 }
 
@@ -486,6 +513,14 @@ func (o *Orchestrator) onResponseDone(res responseResult) {
 	if res.completed && res.turn == o.turn && strings.TrimSpace(res.assistantText) != "" {
 		o.history = append(o.history, llm.Message{Role: llm.RoleAssistant, Content: res.assistantText})
 	}
+	logger.Pipeline(slog.LevelInfo, logger.EventAgentResponseDone,
+		"Agent response done",
+		"room", o.room(), "turn", res.turn,
+		"completed", res.completed,
+		"interrupted", res.interrupted,
+		"text", res.assistantText,
+		"text_len", len(strings.TrimSpace(res.assistantText)),
+	)
 	if o.responseCancel != nil && res.turn == o.turn {
 		o.responseCancel = nil
 	}

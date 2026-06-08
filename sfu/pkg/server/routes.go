@@ -8,5 +8,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("OPTIONS /room/create", s.handleCreateRoom)
 	mux.HandleFunc("POST /room/{id}/join", s.handleJoinRoom)
 	mux.HandleFunc("OPTIONS /room/{id}/join", s.handleJoinRoom)
+	mux.HandleFunc("GET /room/{id}/debug", s.handleRoomDebug)
+	mux.HandleFunc("OPTIONS /room/{id}/debug", s.handleRoomDebug)
 	return mux
 }

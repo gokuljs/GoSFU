@@ -1,9 +1,17 @@
 import { useRef, useState, useCallback } from "react"
 
-const SFU_URL = "http://localhost:8080"
+export const SFU_URL = "http://localhost:8080"
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }]
 
 export type ConnectionState = "idle" | "connecting" | "connected" | "failed"
+export type PeerConnectionStateValue = RTCPeerConnectionState | "idle"
+export type IceConnectionStateValue = RTCIceConnectionState | "idle"
+
+export interface SelectedDevices {
+  audioInput: string
+  videoInput: string
+  audioOutput: string
+}
 
 interface UseWebRTCReturn {
   localStream: MediaStream | null
@@ -11,6 +19,10 @@ interface UseWebRTCReturn {
   roomId: string | null
   participantId: string | null
   connectionState: ConnectionState
+  peerConnectionState: PeerConnectionStateValue
+  iceConnectionState: IceConnectionStateValue
+  devices: MediaDeviceInfo[]
+  selectedDevices: SelectedDevices
   connect: () => Promise<void>
   disconnect: () => void
   toggleMic: () => void
@@ -40,11 +52,47 @@ export function useWebRTC(): UseWebRTCReturn {
   const [participantId, setParticipantId] = useState<string | null>(null)
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("idle")
+  const [peerConnectionState, setPeerConnectionState] =
+    useState<PeerConnectionStateValue>("idle")
+  const [iceConnectionState, setIceConnectionState] =
+    useState<IceConnectionStateValue>("idle")
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+  const [selectedDevices, setSelectedDevices] = useState<SelectedDevices>({
+    audioInput: "",
+    videoInput: "",
+    audioOutput: "",
+  })
   const [isMicOn, setIsMicOn] = useState(true)
   const [isCameraOn, setIsCameraOn] = useState(true)
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
+
+  const refreshDevices = useCallback(async (stream?: MediaStream) => {
+    const nextDevices = await navigator.mediaDevices.enumerateDevices()
+    setDevices(nextDevices)
+
+    const audioTrack = stream?.getAudioTracks()[0]
+    const videoTrack = stream?.getVideoTracks()[0]
+    const audioInputId = audioTrack?.getSettings().deviceId ?? ""
+    const videoInputId = videoTrack?.getSettings().deviceId ?? ""
+    const audioOutputId =
+      nextDevices.find((device) => device.kind === "audiooutput")?.deviceId ?? ""
+
+    setSelectedDevices({
+      audioInput:
+        nextDevices.find((device) => device.deviceId === audioInputId)?.label ||
+        audioTrack?.label ||
+        "Default microphone",
+      videoInput:
+        nextDevices.find((device) => device.deviceId === videoInputId)?.label ||
+        videoTrack?.label ||
+        "Default camera",
+      audioOutput:
+        nextDevices.find((device) => device.deviceId === audioOutputId)?.label ||
+        "Default audio output",
+    })
+  }, [])
 
   const connect = useCallback(async () => {
     try {
@@ -65,15 +113,32 @@ export function useWebRTC(): UseWebRTCReturn {
       })
       setLocalStream(stream)
       localStreamRef.current = stream
+      await refreshDevices(stream)
 
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
       pcRef.current = pc
+      setPeerConnectionState(pc.connectionState)
+      setIceConnectionState(pc.iceConnectionState)
 
       const remote = new MediaStream()
       setRemoteStream(remote)
 
       pc.ontrack = (event) => {
         remote.addTrack(event.track)
+      }
+
+      pc.onconnectionstatechange = () => {
+        setPeerConnectionState(pc.connectionState)
+        if (pc.connectionState === "connected") {
+          setConnectionState("connected")
+        }
+        if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+          setConnectionState("failed")
+        }
+      }
+
+      pc.oniceconnectionstatechange = () => {
+        setIceConnectionState(pc.iceConnectionState)
       }
 
       stream.getTracks().forEach((track) => {
@@ -97,12 +162,15 @@ export function useWebRTC(): UseWebRTCReturn {
       setParticipantId(pid)
       await pc.setRemoteDescription(answer)
 
-      setConnectionState("connected")
+      setConnectionState(
+        pc.connectionState === "connected" ? "connected" : "connecting"
+      )
     } catch (err) {
       console.error("WebRTC connection failed:", err)
       setConnectionState("failed")
+      setPeerConnectionState("failed")
     }
-  }, [])
+  }, [refreshDevices])
 
   const disconnect = useCallback(() => {
     pcRef.current?.close()
@@ -116,6 +184,8 @@ export function useWebRTC(): UseWebRTCReturn {
     setRoomId(null)
     setParticipantId(null)
     setConnectionState("idle")
+    setPeerConnectionState("idle")
+    setIceConnectionState("idle")
     setIsMicOn(true)
     setIsCameraOn(true)
   }, [])
@@ -146,6 +216,10 @@ export function useWebRTC(): UseWebRTCReturn {
     roomId,
     participantId,
     connectionState,
+    peerConnectionState,
+    iceConnectionState,
+    devices,
+    selectedDevices,
     connect,
     disconnect,
     toggleMic,
