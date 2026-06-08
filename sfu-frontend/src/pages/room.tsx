@@ -262,7 +262,7 @@ function TranscriptPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
         {transcript.map((item) => (
           <article
             key={item.id}
@@ -322,7 +322,7 @@ function SessionPanel({
 
   return (
     <Panel title="Session" detail="Live state" className="min-h-0" bodyClassName="min-h-0">
-      <div className="h-full min-h-0 overflow-y-auto pr-1">
+      <div className="h-full min-h-0 overflow-y-auto">
         <div className="space-y-4">
           <StatusRow label="Client" value={labelForState(connectionState)} />
           <StatusRow label="Agent" value={agentStateLabel(peerConnectionState)} />
