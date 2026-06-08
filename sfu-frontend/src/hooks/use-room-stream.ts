@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { parseUtcTimestamp } from "@/lib/format-time"
 
 const MAX_DEBUG_EVENTS = 600
 const DEBUG_EVENT_FLUSH_MS = 300
 const MAX_METRIC_POINTS = 400
+const METRIC_FLUSH_MS = 150
 const METRICS_DEBUG = import.meta.env.DEV
 
 export type StreamConnectionState =
@@ -125,7 +127,9 @@ export function useRoomStream(
   const [metrics, setMetrics] = useState<MetricPoint[]>([])
   const [status, setStatus] = useState<StreamConnectionState>("idle")
   const pendingDebugEventsRef = useRef<DebugEvent[]>([])
+  const pendingMetricsRef = useRef<MetricPoint[]>([])
   const flushTimerRef = useRef<number | null>(null)
+  const metricFlushTimerRef = useRef<number | null>(null)
 
   const flushDebugEvents = useCallback(() => {
     if (pendingDebugEventsRef.current.length === 0) return
@@ -155,6 +159,29 @@ export function useRoomStream(
     if (flushTimerRef.current !== null) {
       window.clearTimeout(flushTimerRef.current)
       flushTimerRef.current = null
+    }
+  }, [])
+
+  const flushMetrics = useCallback(() => {
+    if (pendingMetricsRef.current.length === 0) return
+    const batch = pendingMetricsRef.current
+    pendingMetricsRef.current = []
+    setMetrics((current) => [...current, ...batch].slice(-MAX_METRIC_POINTS))
+  }, [])
+
+  const scheduleMetricFlush = useCallback(() => {
+    if (metricFlushTimerRef.current !== null) return
+    metricFlushTimerRef.current = window.setTimeout(() => {
+      metricFlushTimerRef.current = null
+      flushMetrics()
+    }, METRIC_FLUSH_MS)
+  }, [flushMetrics])
+
+  const clearPendingMetrics = useCallback(() => {
+    pendingMetricsRef.current = []
+    if (metricFlushTimerRef.current !== null) {
+      window.clearTimeout(metricFlushTimerRef.current)
+      metricFlushTimerRef.current = null
     }
   }, [])
 
@@ -194,21 +221,17 @@ export function useRoomStream(
     if (METRICS_DEBUG) {
       console.debug("[stream] received", "metrics", update.name, update.value)
     }
-    setMetrics((current) =>
-      [
-        ...current,
-        {
-          id: update.id,
-          ts: update.ts,
-          turn: update.turn,
-          stage: update.stage,
-          name: update.name,
-          value: update.value,
-          unit: update.unit,
-        },
-      ].slice(-MAX_METRIC_POINTS)
-    )
-  }, [])
+    pendingMetricsRef.current.push({
+      id: update.id,
+      ts: update.ts,
+      turn: update.turn,
+      stage: update.stage,
+      name: update.name,
+      value: update.value,
+      unit: update.unit,
+    })
+    scheduleMetricFlush()
+  }, [scheduleMetricFlush])
 
   useEffect(() => {
     return () => {
@@ -217,13 +240,19 @@ export function useRoomStream(
         flushTimerRef.current = null
       }
       flushDebugEvents()
+      if (metricFlushTimerRef.current !== null) {
+        window.clearTimeout(metricFlushTimerRef.current)
+        metricFlushTimerRef.current = null
+      }
+      flushMetrics()
     }
-  }, [flushDebugEvents])
+  }, [flushDebugEvents, flushMetrics])
 
   useEffect(() => {
     if (!roomId) {
       const timeout = window.setTimeout(() => {
         clearPendingDebugEvents()
+        clearPendingMetrics()
         setStatus("idle")
         setTranscript([])
         setDebugEvents([])
@@ -288,6 +317,11 @@ export function useRoomStream(
         flushTimerRef.current = null
       }
       flushDebugEvents()
+      if (metricFlushTimerRef.current !== null) {
+        window.clearTimeout(metricFlushTimerRef.current)
+        metricFlushTimerRef.current = null
+      }
+      flushMetrics()
     }
   }, [
     addDebugEvent,
@@ -295,7 +329,9 @@ export function useRoomStream(
     applyMetric,
     applyTranscript,
     clearPendingDebugEvents,
+    clearPendingMetrics,
     flushDebugEvents,
+    flushMetrics,
     roomId,
     sfuUrl,
   ])
@@ -308,7 +344,14 @@ export function useRoomStream(
     }
     for (const point of metrics) {
       if (!result[point.stage]) result[point.stage] = {}
-      result[point.stage][point.name] = point
+      const current = result[point.stage][point.name]
+      if (
+        !current ||
+        parseUtcTimestamp(point.ts).getTime() >=
+          parseUtcTimestamp(current.ts).getTime()
+      ) {
+        result[point.stage][point.name] = point
+      }
     }
     return result
   }, [metrics])

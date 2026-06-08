@@ -6,6 +6,7 @@ import {
 } from "@/components/metrics-chart"
 import { avgValue, buildSeries, latestValue } from "@/lib/metrics-series"
 import type { MetricPoint } from "@/hooks/use-room-stream"
+import { formatLocalTime } from "@/lib/format-time"
 
 const TEAL = "rgb(0, 212, 170)"
 const TEAL_DIM = "rgb(0, 184, 148)"
@@ -32,9 +33,12 @@ const TTS_METRICS = [
 const LATENCY_FILTERS = [
   { stage: "stt", name: "first_transcript_ms", id: "stt-first", label: "STT First", color: TEAL },
   { stage: "stt", name: "final_transcript_ms", id: "stt-final", label: "STT Final", color: TEAL_DIM },
+  { stage: "stt", name: "turn_latency_ms", id: "stt-turn", label: "STT Turn", color: TEAL_MID },
   { stage: "llm", name: "ttft_ms", id: "llm-ttft", label: "LLM TTFT", color: TEAL_MID },
-  { stage: "tts", name: "first_byte_ms", id: "tts-byte", label: "TTS Byte", color: TEAL },
+  { stage: "llm", name: "duration_ms", id: "llm-duration", label: "LLM Duration", color: TEAL },
+  { stage: "tts", name: "first_byte_ms", id: "tts-byte", label: "TTS TTFB", color: TEAL },
   { stage: "tts", name: "first_playable_ms", id: "tts-play", label: "TTS Playable", color: TEAL_DIM },
+  { stage: "tts", name: "synthesis_ms", id: "tts-synth", label: "TTS Synth", color: TEAL_MID },
 ]
 
 const TOKEN_FILTERS = [
@@ -42,6 +46,12 @@ const TOKEN_FILTERS = [
   { stage: "llm", name: "completion_tokens", id: "completion", label: "Completion", color: TEAL },
   { stage: "llm", name: "total_tokens", id: "total", label: "Total", color: TEAL_MID },
 ]
+
+const PRIMARY_SPARK_BY_STAGE = {
+  stt: "stt-first",
+  llm: "llm-ttft",
+  tts: "tts-byte",
+}
 
 interface MetricsPanelProps {
   metrics: MetricPoint[]
@@ -65,19 +75,25 @@ export function MetricsPanel({ metrics, latestByStage }: MetricsPanelProps) {
             title="STT"
             defs={STT_METRICS}
             latest={latestByStage.stt ?? {}}
-            sparkSeries={latencySeries.filter((s) => s.id.startsWith("stt"))}
+            sparkSeries={latencySeries.filter(
+              (s) => s.id === PRIMARY_SPARK_BY_STAGE.stt
+            )}
           />
           <StageCard
             title="LLM"
             defs={LLM_METRICS}
             latest={latestByStage.llm ?? {}}
-            sparkSeries={latencySeries.filter((s) => s.id.startsWith("llm"))}
+            sparkSeries={latencySeries.filter(
+              (s) => s.id === PRIMARY_SPARK_BY_STAGE.llm
+            )}
           />
           <StageCard
             title="TTS"
             defs={TTS_METRICS}
             latest={latestByStage.tts ?? {}}
-            sparkSeries={latencySeries.filter((s) => s.id.startsWith("tts"))}
+            sparkSeries={latencySeries.filter(
+              (s) => s.id === PRIMARY_SPARK_BY_STAGE.tts
+            )}
           />
         </div>
       </PanelShell>
@@ -133,12 +149,19 @@ function StageCard({
   latest: Record<string, MetricPoint>
   sparkSeries: ChartSeries[]
 }) {
+  const latestSparkPoint = sparkSeries
+    .flatMap((series) => series.points)
+    .sort((a, b) => b.ts - a.ts)[0]
+
   return (
     <div className="border border-[#1a1a1a] bg-[#050505] p-2">
-      <div className="mb-1.5 text-[9px] tracking-wider text-white/30 uppercase">
-        {title}
+      <div className="mb-1.5 flex items-center justify-between gap-2 text-[9px] tracking-wider uppercase">
+        <span className="text-white/30">{title}</span>
+        <span className="font-mono text-white/20">
+          {latestSparkPoint ? formatLocalTime(latestSparkPoint.isoTs) : "NO TIME"}
+        </span>
       </div>
-      <MetricsChart series={sparkSeries} height={48} showGrid={false} />
+      <MetricsChart series={sparkSeries} height={56} showGrid={true} />
       <div className="mt-2 grid grid-cols-3 gap-1">
         {defs.map((def) => {
           const point = latest[def.key]
@@ -150,6 +173,9 @@ function StageCard({
               </div>
               <div className="font-mono text-[11px] text-[#00d4aa]/90">
                 {point ? formatMetricValue(point.value, unit) : "—"}
+              </div>
+              <div className="mt-0.5 font-mono text-[8px] text-white/15">
+                {point ? formatLocalTime(point.ts) : ""}
               </div>
             </div>
           )
@@ -188,14 +214,32 @@ function ExpandOverlay({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           <ChartBlock
-            title="Latency (ms)"
-            series={latencySeries}
+            title="STT Timeline"
+            series={latencySeries.filter((s) => s.id.startsWith("stt"))}
+            footer={[
+              { label: "Latest First", value: latestValue(latencySeries.find((s) => s.id === "stt-first")?.points ?? []) },
+              { label: "Latest Final", value: latestValue(latencySeries.find((s) => s.id === "stt-final")?.points ?? []) },
+              { label: "Latest Turn", value: latestValue(latencySeries.find((s) => s.id === "stt-turn")?.points ?? []) },
+            ]}
+          />
+          <ChartBlock
+            title="LLM Timeline"
+            series={latencySeries.filter((s) => s.id.startsWith("llm"))}
             footer={[
               { label: "Latest TTFT", value: latestValue(latencySeries.find((s) => s.id === "llm-ttft")?.points ?? []) },
               { label: "Avg TTFT", value: avgValue(latencySeries.find((s) => s.id === "llm-ttft")?.points ?? []) },
-              { label: "Latest TTS Byte", value: latestValue(latencySeries.find((s) => s.id === "tts-byte")?.points ?? []) },
+              { label: "Latest Duration", value: latestValue(latencySeries.find((s) => s.id === "llm-duration")?.points ?? []) },
+            ]}
+          />
+          <ChartBlock
+            title="TTS Timeline"
+            series={latencySeries.filter((s) => s.id.startsWith("tts"))}
+            footer={[
+              { label: "Latest TTFB", value: latestValue(latencySeries.find((s) => s.id === "tts-byte")?.points ?? []) },
+              { label: "Latest Playable", value: latestValue(latencySeries.find((s) => s.id === "tts-play")?.points ?? []) },
+              { label: "Latest Synth", value: latestValue(latencySeries.find((s) => s.id === "tts-synth")?.points ?? []) },
             ]}
           />
           <ChartBlock
