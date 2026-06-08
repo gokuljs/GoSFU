@@ -4,6 +4,8 @@
 
 WebRTC SFU with a voice agent debug console (Go server + React browser client).
 
+![Go SFU debug console](docs/debug-console.png)
+
 ## Prerequisites
 
 - **Node.js** 20+ (for the browser client)
