@@ -12,5 +12,5 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("OPTIONS /room/{id}/debug", s.handleRoomDebug)
 	mux.HandleFunc("GET /room/{id}/transcript", s.handleRoomTranscript)
 	mux.HandleFunc("OPTIONS /room/{id}/transcript", s.handleRoomTranscript)
-	return mux
+	return loggingMiddleware(mux)
 }

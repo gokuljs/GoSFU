@@ -72,6 +72,14 @@ export function RoomPage({
           </span>
         </div>
         <div className="flex items-center gap-3">
+          {roomId && (
+            <span
+              className="max-w-[12rem] truncate text-[10px] tracking-wider text-white/30 uppercase"
+              title={roomId}
+            >
+              Room {shortId(roomId)}
+            </span>
+          )}
           <span className="text-[10px] font-medium tracking-wider text-[#00d4aa]/60 uppercase">
             GO SFU DEBUG CONSOLE
           </span>

@@ -1,14 +1,50 @@
-import { useState, useCallback, useEffect } from "react"
+import { createContext, useCallback, useContext, useEffect, type ReactNode } from "react"
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useNavigate,
+  useParams,
+} from "react-router-dom"
 import { LandingPage } from "@/pages/landing"
 import { RoomPage } from "@/pages/room"
 import { SFU_URL, useWebRTC } from "@/hooks/use-webrtc"
 import { useSessionDebug } from "@/hooks/use-session-debug"
 import { useTranscript } from "@/hooks/use-transcript"
 
-type View = "landing" | "room"
+type WebRTCContextValue = ReturnType<typeof useWebRTC>
 
-export function App() {
-  const [view, setView] = useState<View>("landing")
+const WebRTCContext = createContext<WebRTCContextValue | null>(null)
+
+function WebRTCProvider({ children }: { children: ReactNode }) {
+  const value = useWebRTC()
+  return <WebRTCContext.Provider value={value}>{children}</WebRTCContext.Provider>
+}
+
+function useWebRTCContext() {
+  const value = useContext(WebRTCContext)
+  if (!value) {
+    throw new Error("useWebRTCContext must be used within WebRTCProvider")
+  }
+  return value
+}
+
+function LandingRoute() {
+  const navigate = useNavigate()
+  const { createRoom } = useWebRTCContext()
+
+  const handleConnect = useCallback(async () => {
+    const roomId = await createRoom()
+    navigate(`/room/${roomId}`)
+  }, [createRoom, navigate])
+
+  return <LandingPage onConnect={handleConnect} />
+}
+
+function RoomRoute() {
+  const { roomId: routeRoomId } = useParams()
+  const navigate = useNavigate()
   const {
     localStream,
     remoteStream,
@@ -25,99 +61,100 @@ export function App() {
     toggleCamera,
     isMicOn,
     isCameraOn,
-  } = useWebRTC()
-  const debug = useSessionDebug(roomId, SFU_URL)
-  const transcript = useTranscript(roomId, SFU_URL)
+  } = useWebRTCContext()
+  const activeRoomId = roomId ?? routeRoomId ?? null
+  const debug = useSessionDebug(activeRoomId, SFU_URL)
+  const transcript = useTranscript(activeRoomId, SFU_URL)
   const { addLocalEvent } = debug
 
-  const handleConnect = useCallback(async () => {
-    setView("room")
-    await connect()
-  }, [connect])
+  useEffect(() => {
+    if (!routeRoomId) return
+    void connect(routeRoomId)
+    return () => {
+      disconnect()
+    }
+  }, [routeRoomId, connect, disconnect])
 
   const handleDisconnect = useCallback(() => {
     disconnect()
-    setView("landing")
-  }, [disconnect])
+    navigate("/")
+  }, [disconnect, navigate])
 
   useEffect(() => {
-    if (view !== "room") return
     addLocalEvent("client.connection.state", "Client connection state", {
       state: connectionState,
+      room_id: routeRoomId,
     })
-  }, [addLocalEvent, connectionState, view])
+  }, [addLocalEvent, routeRoomId, connectionState])
 
   useEffect(() => {
-    if (view !== "room") return
     addLocalEvent(
       "client.peer_connection.state",
       "Client peer connection state",
-      { state: peerConnectionState }
+      { state: peerConnectionState, room_id: routeRoomId }
     )
-  }, [addLocalEvent, peerConnectionState, view])
+  }, [addLocalEvent, routeRoomId, peerConnectionState])
 
   useEffect(() => {
-    if (view !== "room") return
     addLocalEvent("client.ice.state", "Client ICE state", {
       state: iceConnectionState,
+      room_id: routeRoomId,
     })
-  }, [addLocalEvent, iceConnectionState, view])
+  }, [addLocalEvent, routeRoomId, iceConnectionState])
 
   useEffect(() => {
-    if (view !== "room") return
     addLocalEvent("client.media.mic", "Microphone toggled", {
       enabled: isMicOn,
+      room_id: routeRoomId,
     })
-  }, [addLocalEvent, isMicOn, view])
+  }, [addLocalEvent, routeRoomId, isMicOn])
 
   useEffect(() => {
-    if (view !== "room") return
     addLocalEvent("client.media.camera", "Camera toggled", {
       enabled: isCameraOn,
+      room_id: routeRoomId,
     })
-  }, [addLocalEvent, isCameraOn, view])
+  }, [addLocalEvent, routeRoomId, isCameraOn])
+
+  if (!routeRoomId) {
+    return <Navigate to="/" replace />
+  }
 
   return (
-    <div className="relative min-h-svh overflow-hidden bg-[#050505]">
-      <div
-        className={`absolute inset-0 transition-opacity duration-500 ${
-          view === "landing"
-            ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0"
-        }`}
-      >
-        <LandingPage onConnect={handleConnect} />
-      </div>
+    <RoomPage
+      localStream={localStream}
+      remoteStream={remoteStream}
+      roomId={routeRoomId}
+      participantId={participantId}
+      connectionState={connectionState}
+      peerConnectionState={peerConnectionState}
+      iceConnectionState={iceConnectionState}
+      debugStatus={debug.status}
+      devices={devices}
+      selectedDevices={selectedDevices}
+      debugEvents={debug.events}
+      transcript={transcript.transcript}
+      onClearEvents={debug.clearEvents}
+      isMicOn={isMicOn}
+      isCameraOn={isCameraOn}
+      onToggleMic={toggleMic}
+      onToggleCamera={toggleCamera}
+      onDisconnect={handleDisconnect}
+    />
+  )
+}
 
-      <div
-        className={`absolute inset-0 transition-opacity duration-500 ${
-          view === "room"
-            ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0"
-        }`}
-      >
-        <RoomPage
-          localStream={localStream}
-          remoteStream={remoteStream}
-          roomId={roomId}
-          participantId={participantId}
-          connectionState={connectionState}
-          peerConnectionState={peerConnectionState}
-          iceConnectionState={iceConnectionState}
-          debugStatus={debug.status}
-          devices={devices}
-          selectedDevices={selectedDevices}
-          debugEvents={debug.events}
-          transcript={transcript.transcript}
-          onClearEvents={debug.clearEvents}
-          isMicOn={isMicOn}
-          isCameraOn={isCameraOn}
-          onToggleMic={toggleMic}
-          onToggleCamera={toggleCamera}
-          onDisconnect={handleDisconnect}
-        />
-      </div>
-    </div>
+export function App() {
+  return (
+    <BrowserRouter>
+      <WebRTCProvider>
+        <Routes>
+          <Route path="/" element={<LandingRoute />} />
+          <Route path="/room/:roomId" element={<RoomRoute />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </WebRTCProvider>
+    </BrowserRouter>
   )
 }
 

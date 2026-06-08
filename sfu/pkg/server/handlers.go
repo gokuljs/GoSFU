@@ -30,6 +30,7 @@ func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := s.rooms.Create()
+	slog.Info("room create requested", "room", id)
 	writeJSON(w, http.StatusOK, createRoomResponse{RoomID: id})
 }
 
@@ -43,6 +44,7 @@ func (s *Server) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 	roomId := r.PathValue("id")
 	rm, ok := s.rooms.Get(roomId)
 	if !ok {
+		slog.Warn("join rejected", "room", roomId, "reason", "not_found")
 		http.Error(w, "room not found", http.StatusNotFound)
 		return
 	}
@@ -57,8 +59,10 @@ func (s *Server) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch err {
 		case room.ErrRoomFull:
+			slog.Warn("join rejected", "room", roomId, "reason", "room_full")
 			http.Error(w, "room full", http.StatusConflict)
 		case room.ErrRoomClosed:
+			slog.Warn("join rejected", "room", roomId, "reason", "room_closed")
 			http.Error(w, "room closed", http.StatusGone)
 		default:
 			slog.Error("join failed", "room", roomId, "error", err)
@@ -66,6 +70,11 @@ func (s *Server) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	slog.Info("participant joined",
+		"room", roomId,
+		"participant", result.ParticipantId,
+	)
 
 	writeJSON(w, http.StatusOK, joinRoomResponse{
 		Sdp:           result.Sdp,

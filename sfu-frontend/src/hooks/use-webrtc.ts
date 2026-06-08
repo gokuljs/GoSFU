@@ -23,7 +23,8 @@ interface UseWebRTCReturn {
   iceConnectionState: IceConnectionStateValue
   devices: MediaDeviceInfo[]
   selectedDevices: SelectedDevices
-  connect: () => Promise<void>
+  createRoom: () => Promise<string>
+  connect: (roomId: string) => Promise<void>
   disconnect: () => void
   toggleMic: () => void
   toggleCamera: () => void
@@ -67,6 +68,7 @@ export function useWebRTC(): UseWebRTCReturn {
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
+  const connectGenerationRef = useRef(0)
 
   const refreshDevices = useCallback(async (stream?: MediaStream) => {
     const nextDevices = await navigator.mediaDevices.enumerateDevices()
@@ -94,85 +96,20 @@ export function useWebRTC(): UseWebRTCReturn {
     })
   }, [])
 
-  const connect = useCallback(async () => {
-    try {
-      setConnectionState("connecting")
-
-      const createRes = await fetch(`${SFU_URL}/room/create`, {
-        method: "POST",
-      })
-      if (!createRes.ok) {
-        throw new Error(`Create failed: ${createRes.status}`)
-      }
-      const { roomId: newRoomId } = await createRes.json()
-      setRoomId(newRoomId)
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      })
-      setLocalStream(stream)
-      localStreamRef.current = stream
-      await refreshDevices(stream)
-
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
-      pcRef.current = pc
-      setPeerConnectionState(pc.connectionState)
-      setIceConnectionState(pc.iceConnectionState)
-
-      const remote = new MediaStream()
-      setRemoteStream(remote)
-
-      pc.ontrack = (event) => {
-        remote.addTrack(event.track)
-      }
-
-      pc.onconnectionstatechange = () => {
-        setPeerConnectionState(pc.connectionState)
-        if (pc.connectionState === "connected") {
-          setConnectionState("connected")
-        }
-        if (pc.connectionState === "failed" || pc.connectionState === "closed") {
-          setConnectionState("failed")
-        }
-      }
-
-      pc.oniceconnectionstatechange = () => {
-        setIceConnectionState(pc.iceConnectionState)
-      }
-
-      stream.getTracks().forEach((track) => {
-        pc.addTrack(track, stream)
-      })
-
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      await waitForIceGathering(pc)
-
-      const joinRes = await fetch(`${SFU_URL}/room/${newRoomId}/join`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sdp: pc.localDescription }),
-      })
-      if (!joinRes.ok) {
-        throw new Error(`Join failed: ${joinRes.status}`)
-      }
-
-      const { sdp: answer, participantId: pid } = await joinRes.json()
-      setParticipantId(pid)
-      await pc.setRemoteDescription(answer)
-
-      setConnectionState(
-        pc.connectionState === "connected" ? "connected" : "connecting"
-      )
-    } catch (err) {
-      console.error("WebRTC connection failed:", err)
-      setConnectionState("failed")
-      setPeerConnectionState("failed")
+  const createRoom = useCallback(async () => {
+    const createRes = await fetch(`${SFU_URL}/room/create`, {
+      method: "POST",
+    })
+    if (!createRes.ok) {
+      throw new Error(`Create failed: ${createRes.status}`)
     }
-  }, [refreshDevices])
+    const { roomId: newRoomId } = await createRes.json()
+    return newRoomId as string
+  }, [])
 
   const disconnect = useCallback(() => {
+    connectGenerationRef.current += 1
+
     pcRef.current?.close()
     pcRef.current = null
 
@@ -189,6 +126,101 @@ export function useWebRTC(): UseWebRTCReturn {
     setIsMicOn(true)
     setIsCameraOn(true)
   }, [])
+
+  const connect = useCallback(
+    async (targetRoomId: string) => {
+      const generation = ++connectGenerationRef.current
+      disconnect()
+      connectGenerationRef.current = generation
+
+      try {
+        setConnectionState("connecting")
+        setRoomId(targetRoomId)
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        })
+        if (connectGenerationRef.current !== generation) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+
+        setLocalStream(stream)
+        localStreamRef.current = stream
+        await refreshDevices(stream)
+
+        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+        pcRef.current = pc
+        setPeerConnectionState(pc.connectionState)
+        setIceConnectionState(pc.iceConnectionState)
+
+        const remote = new MediaStream()
+        setRemoteStream(remote)
+
+        pc.ontrack = (event) => {
+          remote.addTrack(event.track)
+        }
+
+        pc.onconnectionstatechange = () => {
+          setPeerConnectionState(pc.connectionState)
+          if (pc.connectionState === "connected") {
+            setConnectionState("connected")
+          }
+          if (
+            pc.connectionState === "failed" ||
+            pc.connectionState === "closed"
+          ) {
+            setConnectionState("failed")
+          }
+        }
+
+        pc.oniceconnectionstatechange = () => {
+          setIceConnectionState(pc.iceConnectionState)
+        }
+
+        stream.getTracks().forEach((track) => {
+          pc.addTrack(track, stream)
+        })
+
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        await waitForIceGathering(pc)
+
+        if (connectGenerationRef.current !== generation) {
+          return
+        }
+
+        const joinRes = await fetch(`${SFU_URL}/room/${targetRoomId}/join`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sdp: pc.localDescription }),
+        })
+        if (!joinRes.ok) {
+          throw new Error(`Join failed: ${joinRes.status}`)
+        }
+
+        const { sdp: answer, participantId: pid } = await joinRes.json()
+        if (connectGenerationRef.current !== generation) {
+          return
+        }
+
+        setParticipantId(pid)
+        await pc.setRemoteDescription(answer)
+
+        setConnectionState(
+          pc.connectionState === "connected" ? "connected" : "connecting"
+        )
+      } catch (err) {
+        console.error("WebRTC connection failed:", err)
+        if (connectGenerationRef.current === generation) {
+          setConnectionState("failed")
+          setPeerConnectionState("failed")
+        }
+      }
+    },
+    [disconnect, refreshDevices]
+  )
 
   const toggleMic = useCallback(() => {
     const stream = localStreamRef.current
@@ -220,6 +252,7 @@ export function useWebRTC(): UseWebRTCReturn {
     iceConnectionState,
     devices,
     selectedDevices,
+    createRoom,
     connect,
     disconnect,
     toggleMic,

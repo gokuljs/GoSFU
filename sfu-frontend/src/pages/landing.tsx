@@ -19,7 +19,7 @@ export function LandingPage({ onConnect }: LandingPageProps) {
           Connect
         </button>
         <p className="text-[10px] tracking-wide text-white/30 uppercase">
-          Join the SFU room to start streaming
+          Each connect creates a new room at /room/your-id
         </p>
       </div>
     </div>
