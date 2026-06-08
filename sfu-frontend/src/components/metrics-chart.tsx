@@ -384,7 +384,7 @@ function chartBounds(
   const allPoints = series.flatMap((s) => s.points)
   if (allPoints.length === 0 || width <= 0 || height <= 0) return null
 
-  const pad = { top: 8, right: 8, bottom: showLabels ? AXIS_HEIGHT + 8 : 8, left: 8 }
+  const pad = { top: 0, right: 0, bottom: showLabels ? AXIS_HEIGHT : 0, left: 0 }
   const plotW = Math.max(1, width - pad.left - pad.right)
   const plotH = Math.max(1, height - pad.top - pad.bottom)
   const timestamps = uniqueTimestamps(series)
