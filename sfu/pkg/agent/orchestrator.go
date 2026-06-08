@@ -209,6 +209,12 @@ func (o *Orchestrator) handleUserText(ctx context.Context, userText string) {
 		}
 	}
 
+	// Half-duplex: only hand the turn back to listening once the user has
+	// actually heard the whole reply, not just when it was queued. speak()
+	// returns after frames are buffered; the audio is still draining through the
+	// pacer here.
+	_ = o.transport.WaitForPlayout(ctx)
+
 	o.history = append(o.history, llm.Message{Role: llm.RoleAssistant, Content: full.String()})
 }
 
@@ -263,11 +269,7 @@ func (o *Orchestrator) setState(s convState) {
 }
 
 func (o *Orchestrator) send(ctx context.Context, f audio.Frame) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	default:
-		_ = o.transport.Send(f)
-		return true
-	}
+	// Send is backpressured: it blocks while the playout buffer is full, which
+	// paces TTS production to realtime instead of dropping frames.
+	return o.transport.Send(ctx, f) == nil
 }
