@@ -9,8 +9,13 @@ import (
 // Pipeline event names — stable keys for Grafana/Loki queries.
 const (
 	EventAudioFirstFrame  = "pipeline.audio.first_frame"
+	EventAudioLevel       = "pipeline.audio.level"
 	EventVADSpeechStart   = "pipeline.vad.speech_start"
 	EventVADSpeechEnd     = "pipeline.vad.speech_end"
+	EventSTTFrameSent     = "pipeline.stt.frame_sent"
+	EventSTTFrameFailed   = "pipeline.stt.frame_failed"
+	EventSTTEmptyResult   = "pipeline.stt.empty_result"
+	EventSTTResult        = "pipeline.stt.result"
 	EventTurnReady        = "pipeline.turn.ready"
 	EventLLMRequest       = "pipeline.llm.request"
 	EventLLMFirstToken    = "pipeline.llm.first_token"

@@ -10,6 +10,7 @@ import (
 	"context"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"github.com/gokuljs/goSfu/pkg/logger"
 	"github.com/pion/webrtc/v4"
@@ -60,9 +61,9 @@ func (p *Inbound) Run(ctx context.Context, track *webrtc.TrackRemote) {
 		firstFrame   bool
 		dropped      atomic.Uint64
 		dropReported atomic.Bool
+		nextLevelLog time.Time
 	)
 
-	buf := make([]byte, 1500) // reuse buffer for each RTP read
 	for {
 		select {
 		case <-ctx.Done():
@@ -70,18 +71,32 @@ func (p *Inbound) Run(ctx context.Context, track *webrtc.TrackRemote) {
 		default:
 		}
 
-		n, _, err := track.Read(buf)
+		pkt, _, err := track.ReadRTP()
 		if err != nil {
 			slog.Info("inbound audio stopped", "room", p.roomID, "error", err)
 			return
 		}
+		if len(pkt.Payload) == 0 {
+			continue
+		}
 
-		pcm, err := p.decoder.Decode(buf[:n])
+		pcm, err := p.decoder.Decode(pkt.Payload)
 		if err != nil {
 			continue // corrupt packet — do not stall the track read loop
 		}
 
 		for _, frame := range p.buffer.Push(pcm) {
+			now := time.Now()
+			if !firstFrame || now.After(nextLevelLog) {
+				nextLevelLog = now.Add(time.Second)
+				logger.Pipeline(slog.LevelDebug, logger.EventAudioLevel,
+					"Inbound mic PCM level",
+					"room", p.roomID,
+					"sample_rate", frame.SampleRate,
+					"samples", len(frame.Samples),
+					"rms", audioRMSForLog(frame.Samples),
+				)
+			}
 			if !firstFrame {
 				firstFrame = true
 				logger.Pipeline(slog.LevelInfo, logger.EventAudioFirstFrame,
@@ -109,4 +124,8 @@ func (p *Inbound) Run(ctx context.Context, track *webrtc.TrackRemote) {
 			}
 		}
 	}
+}
+
+func audioRMSForLog(samples []int16) int {
+	return int(RMS(samples))
 }

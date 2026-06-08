@@ -49,6 +49,9 @@ type Orchestrator struct {
 	pending      strings.Builder // finalized STT text for the in-progress turn
 	turn         int
 	turnStart    time.Time // wall clock when current turn processing began
+
+	sttFrames       uint64
+	nextSTTLevelLog time.Time
 }
 
 func NewOrchestrator(cfg Config, t transport.Transport) *Orchestrator {
@@ -144,7 +147,29 @@ func (o *Orchestrator) onAudio(ctx context.Context, sttSess stt.Session, frame a
 		Samples:    audio.Resample(frame.Samples, frame.SampleRate, sttRate),
 		SampleRate: sttRate,
 	}
-	_ = sttSess.SendFrame(ctx, sf)
+	if err := sttSess.SendFrame(ctx, sf); err != nil {
+		logger.Pipeline(slog.LevelWarn, logger.EventSTTFrameFailed,
+			"STT frame send failed",
+			"room", o.room(), "turn", o.turn+1,
+			"sample_rate", sf.SampleRate,
+			"samples", len(sf.Samples),
+			"error", err,
+		)
+		return
+	}
+	o.sttFrames++
+	now := time.Now()
+	if o.sttFrames == 1 || now.After(o.nextSTTLevelLog) {
+		o.nextSTTLevelLog = now.Add(time.Second)
+		logger.Pipeline(slog.LevelDebug, logger.EventSTTFrameSent,
+			"STT frame sent",
+			"room", o.room(), "turn", o.turn+1,
+			"frame_count", o.sttFrames,
+			"sample_rate", sf.SampleRate,
+			"samples", len(sf.Samples),
+			"rms", int(audio.RMS(sf.Samples)),
+		)
+	}
 }
 
 // onTranscript buffers finalized transcript segments for the current turn.
@@ -157,6 +182,14 @@ func (o *Orchestrator) onTranscript(ctx context.Context, res stt.Result) {
 	if text == "" {
 		return
 	}
+	logger.Pipeline(slog.LevelDebug, logger.EventSTTResult,
+		"STT transcript received",
+		"room", o.room(), "turn", o.turn+1,
+		"is_final", res.IsFinal,
+		"confidence", res.Confidence,
+		"text_len", len(text),
+		"text_preview", logger.Preview(text, 80),
+	)
 	if o.pending.Len() > 0 {
 		o.pending.WriteByte(' ')
 	}
