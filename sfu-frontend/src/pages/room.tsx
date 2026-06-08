@@ -30,6 +30,14 @@ import type {
 } from "@/hooks/use-room-stream"
 import { formatLocalTime } from "@/lib/format-time"
 
+const SIDEBAR_WAVEFORM_PROPS = {
+  height: "100%",
+  barWidth: 2,
+  barGap: 2,
+  mode: "static" as const,
+  fadeEdges: true,
+}
+
 interface RoomPageProps {
   localStream: MediaStream | null
   remoteStream: MediaStream | null
@@ -49,6 +57,11 @@ interface RoomPageProps {
   onToggleMic: () => void
   onToggleCamera: () => void
   onDisconnect: () => void
+  systemPrompt: string
+  onSystemPromptChange: (value: string) => void
+  onStartSession: () => void
+  onStopSession: () => void
+  canEditPrompt: boolean
 }
 
 export function RoomPage({
@@ -69,7 +82,16 @@ export function RoomPage({
   onToggleMic,
   onToggleCamera,
   onDisconnect,
+  systemPrompt,
+  onSystemPromptChange,
+  onStartSession,
+  onStopSession,
+  canEditPrompt,
 }: RoomPageProps) {
+  const botHasAudio =
+    !!remoteStream &&
+    remoteStream.getAudioTracks().some((track) => track.readyState === "live")
+
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-[#050505] text-white">
       <header className="flex items-center justify-between border-b border-[#1a1a1a] px-4 py-3">
@@ -82,7 +104,7 @@ export function RoomPage({
         <div className="flex items-center gap-3">
           {roomId && (
             <span
-              className="max-w-[12rem] truncate text-[10px] tracking-wider text-white/30 uppercase"
+              className="max-w-48 truncate text-[10px] tracking-wider text-white/30 uppercase"
               title={roomId}
             >
               Room {shortId(roomId)}
@@ -102,25 +124,59 @@ export function RoomPage({
       </header>
 
       <main className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_16rem] gap-2 px-2 pt-2 pb-4 xl:grid-cols-[18rem_minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)_16rem]">
-        <section className="grid min-h-0 gap-2 lg:grid-cols-2 xl:grid-cols-1">
+        <section className="grid min-h-0 grid-rows-3 gap-2">
           <Panel title="USER VIDEO" detail={isMicOn ? "MIC LIVE" : "MIC MUTED"}>
-            <div className="space-y-3">
-              <VideoTile stream={localStream} muted label="User" type="human" />
-              <LiveWaveform
-                active={isMicOn}
-                height={42}
-                barWidth={2}
-                barGap={2}
-                barColor="rgba(0, 212, 170, 0.8)"
-                mode="static"
-                fadeEdges
-                sensitivity={1.5}
-              />
-            </div>
+            <SidebarCardLayout
+              main={
+                <VideoTile
+                  stream={localStream}
+                  muted
+                  label="User"
+                  type="human"
+                  compact
+                />
+              }
+              waveform={
+                <LiveWaveform
+                  active={isMicOn}
+                  barColor="rgba(0, 212, 170, 0.8)"
+                  sensitivity={1.5}
+                  {...SIDEBAR_WAVEFORM_PROPS}
+                />
+              }
+              footer={<span className="sr-only">User audio monitor</span>}
+            />
           </Panel>
           <Panel title="BOT VIDEO" detail={remoteStream ? "AGENT AUDIO" : "IDLE"}>
-            <VideoTile stream={remoteStream} label="Agent" type="agent" />
+            <SidebarCardLayout
+              main={
+                <VideoTile
+                  stream={remoteStream}
+                  label="Agent"
+                  type="agent"
+                  compact
+                />
+              }
+              waveform={
+                <LiveWaveform
+                  active={botHasAudio}
+                  mediaStream={remoteStream}
+                  barColor="rgba(0, 212, 170, 0.8)"
+                  sensitivity={1.8}
+                  {...SIDEBAR_WAVEFORM_PROPS}
+                />
+              }
+              footer={<span className="sr-only">Agent audio monitor</span>}
+            />
           </Panel>
+          <AgentConfigPanel
+            systemPrompt={systemPrompt}
+            onSystemPromptChange={onSystemPromptChange}
+            onStartSession={onStartSession}
+            onStopSession={onStopSession}
+            canEditPrompt={canEditPrompt}
+            connectionState={connectionState}
+          />
         </section>
 
         <Panel
@@ -209,6 +265,88 @@ function Controls({
         <PhoneDisconnect weight="fill" />
       </Button>
     </div>
+  )
+}
+
+function SidebarCardLayout({
+  main,
+  waveform,
+  footer,
+}: {
+  main: ReactNode
+  waveform: ReactNode
+  footer: ReactNode
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="min-h-0 flex-1">{main}</div>
+      <div className="h-8 shrink-0">{waveform}</div>
+      <div className="flex h-7 shrink-0 items-center">{footer}</div>
+    </div>
+  )
+}
+
+function AgentConfigPanel({
+  systemPrompt,
+  onSystemPromptChange,
+  onStartSession,
+  onStopSession,
+  canEditPrompt,
+  connectionState,
+}: {
+  systemPrompt: string
+  onSystemPromptChange: (value: string) => void
+  onStartSession: () => void
+  onStopSession: () => void
+  canEditPrompt: boolean
+  connectionState: ConnectionState
+}) {
+  const sessionActive =
+    connectionState === "connecting" || connectionState === "connected"
+
+  return (
+    <Panel title="SYSTEM PROMPT" detail={canEditPrompt ? "EDITABLE" : "LOCKED"}>
+      <SidebarCardLayout
+        main={
+          <textarea
+            value={systemPrompt}
+            onChange={(event) => onSystemPromptChange(event.target.value)}
+            readOnly={!canEditPrompt}
+            placeholder="Define how the agent should behave..."
+            className="h-full w-full resize-none border border-[#1a1a1a] bg-[#050505] px-2 py-2 font-mono text-[10px] leading-5 text-white/60 outline-none placeholder:text-white/20 read-only:cursor-default read-only:text-white/40 focus:border-[#00d4aa]/30"
+          />
+        }
+        waveform={
+          <LiveWaveform
+            active={false}
+            barColor="rgba(0, 212, 170, 0.35)"
+            {...SIDEBAR_WAVEFORM_PROPS}
+          />
+        }
+        footer={
+          sessionActive ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 w-full border-[#1a1a1a] bg-[#050505] text-[10px] tracking-wider text-[#ffaa00] hover:border-[#ffaa00]/30 hover:bg-[#ffaa00]/5"
+              onClick={onStopSession}
+            >
+              Stop Session
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 w-full border-[#1a1a1a] bg-[#050505] text-[10px] tracking-wider text-[#00d4aa] hover:border-[#00d4aa]/30 hover:bg-[#00d4aa]/5"
+              onClick={onStartSession}
+              disabled={!systemPrompt.trim()}
+            >
+              Start Session
+            </Button>
+          )
+        }
+      />
+    </Panel>
   )
 }
 

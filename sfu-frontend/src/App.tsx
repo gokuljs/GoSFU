@@ -1,4 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, type ReactNode } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react"
 import {
   BrowserRouter,
   Navigate,
@@ -11,6 +18,7 @@ import { LandingPage } from "@/pages/landing"
 import { RoomPage } from "@/pages/room"
 import { SFU_URL, useWebRTC } from "@/hooks/use-webrtc"
 import { useRoomStream } from "@/hooks/use-room-stream"
+import { DEFAULT_SYSTEM_PROMPT } from "@/lib/agent-defaults"
 
 type WebRTCContextValue = ReturnType<typeof useWebRTC>
 
@@ -55,6 +63,8 @@ function RoomRoute() {
     selectedDevices,
     connect,
     disconnect,
+    stopSession,
+    deleteRoom,
     toggleMic,
     toggleCamera,
     isMicOn,
@@ -63,19 +73,36 @@ function RoomRoute() {
   const activeRoomId = roomId ?? routeRoomId ?? null
   const stream = useRoomStream(activeRoomId, SFU_URL)
   const { addLocalEvent } = stream
+  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
 
   useEffect(() => {
-    if (!routeRoomId) return
-    void connect(routeRoomId)
+    setSystemPrompt(DEFAULT_SYSTEM_PROMPT)
     return () => {
       disconnect()
     }
-  }, [routeRoomId, connect, disconnect])
+  }, [routeRoomId, disconnect])
 
-  const handleDisconnect = useCallback(() => {
-    disconnect()
+  const handleStartSession = useCallback(() => {
+    if (!routeRoomId) return
+    void connect(routeRoomId, systemPrompt)
+  }, [connect, routeRoomId, systemPrompt])
+
+  const handleStopSession = useCallback(() => {
+    if (!routeRoomId) return
+    void stopSession(routeRoomId)
+  }, [routeRoomId, stopSession])
+
+  const handleDisconnect = useCallback(async () => {
+    if (routeRoomId) {
+      await deleteRoom(routeRoomId)
+    } else {
+      disconnect()
+    }
     navigate("/")
-  }, [disconnect, navigate])
+  }, [deleteRoom, disconnect, navigate, routeRoomId])
+
+  const canEditPrompt =
+    connectionState === "idle" || connectionState === "failed"
 
   useEffect(() => {
     addLocalEvent("client.connection.state", "Client connection state", {
@@ -137,6 +164,11 @@ function RoomRoute() {
       onToggleMic={toggleMic}
       onToggleCamera={toggleCamera}
       onDisconnect={handleDisconnect}
+      systemPrompt={systemPrompt}
+      onSystemPromptChange={setSystemPrompt}
+      onStartSession={handleStartSession}
+      onStopSession={handleStopSession}
+      canEditPrompt={canEditPrompt}
     />
   )
 }
