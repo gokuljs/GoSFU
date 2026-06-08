@@ -64,7 +64,7 @@ export function useWebRTC(): UseWebRTCReturn {
     audioOutput: "",
   })
   const [isMicOn, setIsMicOn] = useState(true)
-  const [isCameraOn, setIsCameraOn] = useState(true)
+  const [isCameraOn, setIsCameraOn] = useState(false)
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -124,7 +124,7 @@ export function useWebRTC(): UseWebRTCReturn {
     setPeerConnectionState("idle")
     setIceConnectionState("idle")
     setIsMicOn(true)
-    setIsCameraOn(true)
+    setIsCameraOn(false)
   }, [])
 
   const connect = useCallback(
@@ -138,7 +138,7 @@ export function useWebRTC(): UseWebRTCReturn {
         setRoomId(targetRoomId)
 
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+          video: false,
           audio: true,
         })
         if (connectGenerationRef.current !== generation) {
@@ -232,15 +232,31 @@ export function useWebRTC(): UseWebRTCReturn {
     }
   }, [])
 
-  const toggleCamera = useCallback(() => {
+  const toggleCamera = useCallback(async () => {
     const stream = localStreamRef.current
+    const pc = pcRef.current
     if (!stream) return
-    const videoTrack = stream.getVideoTracks()[0]
-    if (videoTrack) {
-      videoTrack.enabled = !videoTrack.enabled
-      setIsCameraOn(videoTrack.enabled)
+
+    let videoTrack = stream.getVideoTracks()[0]
+    if (!videoTrack) {
+      try {
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        })
+        videoTrack = videoStream.getVideoTracks()[0]
+        stream.addTrack(videoTrack)
+        pc?.addTrack(videoTrack, stream)
+        setIsCameraOn(true)
+        await refreshDevices(stream)
+      } catch (err) {
+        console.error("Camera failed:", err)
+      }
+      return
     }
-  }, [])
+
+    videoTrack.enabled = !videoTrack.enabled
+    setIsCameraOn(videoTrack.enabled)
+  }, [refreshDevices])
 
   return {
     localStream,

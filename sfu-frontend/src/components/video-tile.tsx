@@ -66,7 +66,7 @@ export function VideoTile({
           ? "Connecting..."
           : "Idle"
 
-  const [videoEnabled, setVideoEnabled] = useState(true)
+  const [videoEnabled, setVideoEnabled] = useState(false)
 
   useEffect(() => {
     if (!stream) return
