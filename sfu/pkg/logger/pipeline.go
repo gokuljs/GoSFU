@@ -11,6 +11,8 @@ import (
 const (
 	EventAudioFirstFrame    = "pipeline.audio.first_frame"
 	EventAudioLevel         = "pipeline.audio.level"
+	EventVADAnalyzeFailed   = "pipeline.vad.analyze_failed"
+	EventVADProbability     = "pipeline.vad.probability"
 	EventVADSpeechStart     = "pipeline.vad.speech_start"
 	EventVADSpeechEnd       = "pipeline.vad.speech_end"
 	EventSTTFrameSent       = "pipeline.stt.frame_sent"

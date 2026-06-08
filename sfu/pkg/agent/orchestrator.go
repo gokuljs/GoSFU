@@ -57,6 +57,7 @@ type Orchestrator struct {
 
 	sttFrames       uint64
 	nextSTTLevelLog time.Time
+	nextVADLevelLog time.Time
 
 	speechStartAt      time.Time
 	speechEndAt        time.Time
@@ -177,37 +178,48 @@ func (o *Orchestrator) onAudio(ctx context.Context, sttSess stt.Session, frame a
 		Samples:    audio.Resample(frame.Samples, frame.SampleRate, vadRate),
 		SampleRate: vadRate,
 	}
-	if events, err := o.cfg.Plugins.VAD.Analyze(ctx, vf); err == nil {
-		for _, e := range events {
-			switch e.Type {
-			case vad.SpeechStart:
-				if !o.userSpeaking {
-					o.userSpeaking = true
-					o.utteranceTurn = o.turn + 1
-					o.speechStartAt = time.Now()
-					o.speechEndAt = time.Time{}
-					o.firstTranscriptHit = false
-					if o.state == stateResponding {
-						o.interruptResponse("vad_speech_start")
-					}
-					logger.Pipeline(slog.LevelInfo, logger.EventVADSpeechStart,
-						"User started speaking",
-						"room", o.room(), "turn", o.turn+1,
-					)
+	events, err := o.cfg.Plugins.VAD.Analyze(ctx, vf)
+	if err != nil {
+		logger.Pipeline(slog.LevelWarn, logger.EventVADAnalyzeFailed,
+			"VAD analyze failed",
+			"room", o.room(), "turn", o.turn+1,
+			"provider", o.cfg.Plugins.VAD.Name(),
+			"sample_rate", vf.SampleRate,
+			"samples", len(vf.Samples),
+			"rms", int(audio.RMS(vf.Samples)),
+			"error", err,
+		)
+	}
+	o.logVADDiagnostics(vf)
+	for _, e := range events {
+		switch e.Type {
+		case vad.SpeechStart:
+			if !o.userSpeaking {
+				o.userSpeaking = true
+				o.utteranceTurn = o.turn + 1
+				o.speechStartAt = time.Now()
+				o.speechEndAt = time.Time{}
+				o.firstTranscriptHit = false
+				if o.state == stateResponding {
+					o.interruptResponse("vad_speech_start")
 				}
-			case vad.SpeechEnd:
-				if o.userSpeaking {
-					o.userSpeaking = false
-					o.speechEndAt = time.Now()
-					logger.Pipeline(slog.LevelDebug, logger.EventVADSpeechEnd,
-						"User stopped speaking",
-						"room", o.room(), "turn", o.turn+1,
-					)
-					if o.pending.Len() == 0 && !o.firstTranscriptHit {
-						o.emitMetric(o.utteranceTurn, "stt", "empty_result", "count", 1, nil)
-					}
-					o.maybeEndTurn(ctx)
+				logger.Pipeline(slog.LevelInfo, logger.EventVADSpeechStart,
+					"User started speaking",
+					"room", o.room(), "turn", o.turn+1,
+				)
+			}
+		case vad.SpeechEnd:
+			if o.userSpeaking {
+				o.userSpeaking = false
+				o.speechEndAt = time.Now()
+				logger.Pipeline(slog.LevelDebug, logger.EventVADSpeechEnd,
+					"User stopped speaking",
+					"room", o.room(), "turn", o.turn+1,
+				)
+				if o.pending.Len() == 0 && !o.firstTranscriptHit {
+					o.emitMetric(o.utteranceTurn, "stt", "empty_result", "count", 1, nil)
 				}
+				o.maybeEndTurn(ctx)
 			}
 		}
 	}
@@ -240,6 +252,42 @@ func (o *Orchestrator) onAudio(ctx context.Context, sttSess stt.Session, frame a
 			"rms", int(audio.RMS(sf.Samples)),
 		)
 	}
+}
+
+func (o *Orchestrator) logVADDiagnostics(frame audio.Frame) {
+	now := time.Now()
+	if !o.nextVADLevelLog.IsZero() && now.Before(o.nextVADLevelLog) {
+		return
+	}
+	o.nextVADLevelLog = now.Add(time.Second)
+	diagnosticProvider, ok := o.cfg.Plugins.VAD.(vad.DiagnosticProvider)
+	if !ok {
+		logger.Pipeline(slog.LevelDebug, logger.EventVADProbability,
+			"VAD diagnostics unavailable",
+			"room", o.room(), "turn", o.turn+1,
+			"provider", o.cfg.Plugins.VAD.Name(),
+			"sample_rate", frame.SampleRate,
+			"samples", len(frame.Samples),
+			"rms", int(audio.RMS(frame.Samples)),
+		)
+		return
+	}
+	d := diagnosticProvider.Diagnostics()
+	logger.Pipeline(slog.LevelDebug, logger.EventVADProbability,
+		"VAD probability sample",
+		"room", o.room(), "turn", o.turn+1,
+		"provider", o.cfg.Plugins.VAD.Name(),
+		"probability", d.LastProbability,
+		"speaking", d.Speaking,
+		"silent_count", d.SilentCount,
+		"pending_samples", d.PendingSamples,
+		"window_size", d.WindowSize,
+		"speech_threshold", d.SpeechThreshold,
+		"silence_threshold", d.SilenceThreshold,
+		"sample_rate", frame.SampleRate,
+		"samples", len(frame.Samples),
+		"rms", int(audio.RMS(frame.Samples)),
+	)
 }
 
 // onTranscript buffers finalized transcript segments for the current turn.

@@ -1,53 +1,118 @@
-// Package silero implements vad.Provider using the Silero VAD v5 ONNX model
-// via ONNX Runtime (CGO).
+// Package silero implements vad.Provider using the Silero VAD ONNX model
+// via ONNX Runtime (direct CGO bindings).
+//
+// Reference: https://github.com/streamer45/silero-vad-go
 //
 // The model needs:
-//   - the ONNX Runtime shared library  (env ONNXRUNTIME_LIB_PATH)
-//   - the silero_vad.onnx model file    (env SILERO_MODEL_PATH)
+//   - ONNX Runtime library installed (e.g., /opt/homebrew/lib/libonnxruntime.dylib)
+//   - the silero_vad.onnx model file (env SILERO_MODEL_PATH)
 //
-// It expects exactly 512 float32 samples per inference at 16kHz, and carries a
-// recurrent state tensor (shape [2,1,128]) between calls. The orchestrator
-// sends 20ms/320-sample frames, so we buffer and re-window to 512 internally.
+// It expects 512 float32 samples per inference at 16kHz. After the first window,
+// we prepend a 64-sample context from the previous window for continuity.
 package silero
+
+// #cgo CFLAGS: -Wall -std=c99 -I/opt/homebrew/include
+// #cgo LDFLAGS: -L/opt/homebrew/lib -lonnxruntime
+// #include <stdlib.h>
+// #include <string.h>
+// #include <stdint.h>
+// #include <onnxruntime/onnxruntime_c_api.h>
+//
+// static const OrtApi* gosfu_ort_api() {
+//   return OrtGetApiBase()->GetApi(ORT_API_VERSION);
+// }
+//
+// static void gosfu_release_status(const OrtApi* api, OrtStatus* status) {
+//   if (status != NULL) api->ReleaseStatus(status);
+// }
+//
+// static const char* gosfu_error_message(const OrtApi* api, OrtStatus* status) {
+//   return api->GetErrorMessage(status);
+// }
+//
+// static OrtStatus* gosfu_create_env(const OrtApi* api, OrtEnv** env) {
+//   return api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "gosfu-vad", env);
+// }
+//
+// static void gosfu_release_env(const OrtApi* api, OrtEnv* env) {
+//   if (env != NULL) api->ReleaseEnv(env);
+// }
+//
+// static OrtStatus* gosfu_create_session_options(const OrtApi* api, OrtSessionOptions** opts) {
+//   return api->CreateSessionOptions(opts);
+// }
+//
+// static void gosfu_release_session_options(const OrtApi* api, OrtSessionOptions* opts) {
+//   if (opts != NULL) api->ReleaseSessionOptions(opts);
+// }
+//
+// static OrtStatus* gosfu_set_threads(const OrtApi* api, OrtSessionOptions* opts) {
+//   OrtStatus* status = api->SetIntraOpNumThreads(opts, 1);
+//   if (status != NULL) return status;
+//   status = api->SetInterOpNumThreads(opts, 1);
+//   if (status != NULL) return status;
+//   return api->SetSessionGraphOptimizationLevel(opts, ORT_ENABLE_ALL);
+// }
+//
+// static OrtStatus* gosfu_create_session(const OrtApi* api, OrtEnv* env, const char* model_path, OrtSessionOptions* opts, OrtSession** session) {
+//   return api->CreateSession(env, model_path, opts, session);
+// }
+//
+// static void gosfu_release_session(const OrtApi* api, OrtSession* session) {
+//   if (session != NULL) api->ReleaseSession(session);
+// }
+//
+// static OrtStatus* gosfu_create_memory_info(const OrtApi* api, OrtMemoryInfo** memory_info) {
+//   return api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, memory_info);
+// }
+//
+// static void gosfu_release_memory_info(const OrtApi* api, OrtMemoryInfo* memory_info) {
+//   if (memory_info != NULL) api->ReleaseMemoryInfo(memory_info);
+// }
+//
+// static OrtStatus* gosfu_create_float_tensor(const OrtApi* api, const OrtMemoryInfo* memory_info, float* data, size_t len, int64_t* shape, size_t shape_len, OrtValue** value) {
+//   return api->CreateTensorWithDataAsOrtValue(memory_info, data, len * sizeof(float), shape, shape_len, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, value);
+// }
+//
+// static OrtStatus* gosfu_create_int64_tensor(const OrtApi* api, const OrtMemoryInfo* memory_info, int64_t* data, size_t len, int64_t* shape, size_t shape_len, OrtValue** value) {
+//   return api->CreateTensorWithDataAsOrtValue(memory_info, data, len * sizeof(int64_t), shape, shape_len, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, value);
+// }
+//
+// static OrtStatus* gosfu_run(const OrtApi* api, OrtSession* session, const char* const* input_names, const OrtValue* const* inputs, size_t input_count, const char* const* output_names, size_t output_count, OrtValue** outputs) {
+//   return api->Run(session, NULL, input_names, inputs, input_count, output_names, output_count, outputs);
+// }
+//
+// static OrtStatus* gosfu_tensor_data(const OrtApi* api, OrtValue* value, void** data) {
+//   return api->GetTensorMutableData(value, data);
+// }
+//
+// static void gosfu_release_value(const OrtApi* api, OrtValue* value) {
+//   if (value != NULL) api->ReleaseValue(value);
+// }
+import "C"
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"sync"
+	"unsafe"
 
 	"github.com/gokuljs/goSfu/pkg/agent/audio"
 	"github.com/gokuljs/goSfu/plugins/vad"
-	ort "github.com/yalue/onnxruntime_go"
 )
 
 const (
 	windowSize  = 512 // samples per inference @16k
+	contextLen  = 64  // context samples prepended after first window
 	stateLen    = 2 * 1 * 128
 	defaultRate = 16000
 
 	speechThreshold  = 0.5  // prob >= this => speech
 	silenceThreshold = 0.35 // prob < this  => silence (hysteresis)
-	// 512 samples = 32ms per window. ~600ms silence => end of turn.
-	minSilenceWindows = 19 // ceil(600 / 32)
+	minSilenceMs     = 100  // ms of silence before ending speech
+	speechPadMs      = 30   // padding around speech segments
 )
-
-// ortInit ensures the ONNX environment is initialized exactly once per process.
-var ortInit sync.Once
-var ortErr error
-
-func initORT() error {
-	ortInit.Do(func() {
-		libPath := os.Getenv("ONNXRUNTIME_LIB_PATH")
-		if libPath == "" {
-			ortErr = fmt.Errorf("silero: ONNXRUNTIME_LIB_PATH not set")
-			return
-		}
-		ort.SetSharedLibraryPath(libPath)
-		ortErr = ort.InitializeEnvironment()
-	})
-	return ortErr
-}
 
 func init() {
 	vad.Register("silero", func(_ vad.Options) (vad.Provider, error) {
@@ -55,74 +120,74 @@ func init() {
 		if modelPath == "" {
 			return nil, fmt.Errorf("silero: SILERO_MODEL_PATH not set")
 		}
-		if err := initORT(); err != nil {
-			return nil, err
-		}
 		return New(modelPath)
 	})
 }
 
-// Provider is shared/long-lived; each NewSession-equivalent here is the Provider
-// itself because the orchestrator keeps one VAD instance per call and calls
-// Reset() at the start. State lives on the Provider.
 type Provider struct {
-	session *ort.DynamicAdvancedSession
+	api         *C.OrtApi
+	env         *C.OrtEnv
+	sessionOpts *C.OrtSessionOptions
+	session     *C.OrtSession
+	memoryInfo  *C.OrtMemoryInfo
+	cStrings    map[string]*C.char
 
-	// reusable tensors (created once, data mutated per inference)
-	inputT  *ort.Tensor[float32]
-	stateT  *ort.Tensor[float32]
-	srT     *ort.Tensor[int64]
-	probT   *ort.Tensor[float32]
-	nstateT *ort.Tensor[float32]
+	state [stateLen]float32
+	ctx   [contextLen]float32
 
-	pending []float32 // accumulates samples until >= windowSize
+	pending []float32
 
-	speaking    bool
-	silentCount int
-	mu          sync.Mutex
+	currSample int
+	triggered  bool
+	tempEnd    int
+	lastProb   float32
+	mu         sync.Mutex
 }
 
 func New(modelPath string) (*Provider, error) {
-	// Create reusable tensors. Names below MUST match Step 2 output.
-	inputT, err := ort.NewEmptyTensor[float32](ort.NewShape(1, windowSize))
-	if err != nil {
-		return nil, err
+	p := &Provider{
+		api:      C.gosfu_ort_api(),
+		cStrings: make(map[string]*C.char),
 	}
-	stateT, err := ort.NewEmptyTensor[float32](ort.NewShape(2, 1, 128))
-	if err != nil {
-		return nil, err
-	}
-	srT, err := ort.NewTensor(ort.NewShape(1), []int64{defaultRate})
-	if err != nil {
-		return nil, err
-	}
-	probT, err := ort.NewEmptyTensor[float32](ort.NewShape(1, 1))
-	if err != nil {
-		return nil, err
-	}
-	nstateT, err := ort.NewEmptyTensor[float32](ort.NewShape(2, 1, 128))
-	if err != nil {
-		return nil, err
+	if p.api == nil {
+		return nil, fmt.Errorf("silero: failed to get ONNX Runtime API")
 	}
 
-	session, err := ort.NewDynamicAdvancedSession(
-		modelPath,
-		[]string{"input", "state", "sr"}, // <-- from Step 2
-		[]string{"output", "stateN"},     // <-- from Step 2
-		nil,
-	)
-	if err != nil {
-		return nil, err
+	if status := C.gosfu_create_env(p.api, &p.env); status != nil {
+		defer C.gosfu_release_status(p.api, status)
+		return nil, fmt.Errorf("silero: create env: %s", C.GoString(C.gosfu_error_message(p.api, status)))
 	}
 
-	return &Provider{
-		session: session,
-		inputT:  inputT,
-		stateT:  stateT,
-		srT:     srT,
-		probT:   probT,
-		nstateT: nstateT,
-	}, nil
+	if status := C.gosfu_create_session_options(p.api, &p.sessionOpts); status != nil {
+		defer C.gosfu_release_status(p.api, status)
+		p.Close()
+		return nil, fmt.Errorf("silero: create session options: %s", C.GoString(C.gosfu_error_message(p.api, status)))
+	}
+
+	if status := C.gosfu_set_threads(p.api, p.sessionOpts); status != nil {
+		defer C.gosfu_release_status(p.api, status)
+		p.Close()
+		return nil, fmt.Errorf("silero: configure session: %s", C.GoString(C.gosfu_error_message(p.api, status)))
+	}
+
+	p.cStrings["modelPath"] = C.CString(modelPath)
+	if status := C.gosfu_create_session(p.api, p.env, p.cStrings["modelPath"], p.sessionOpts, &p.session); status != nil {
+		defer C.gosfu_release_status(p.api, status)
+		p.Close()
+		return nil, fmt.Errorf("silero: create session: %s", C.GoString(C.gosfu_error_message(p.api, status)))
+	}
+
+	if status := C.gosfu_create_memory_info(p.api, &p.memoryInfo); status != nil {
+		defer C.gosfu_release_status(p.api, status)
+		p.Close()
+		return nil, fmt.Errorf("silero: create memory info: %s", C.GoString(C.gosfu_error_message(p.api, status)))
+	}
+
+	for _, name := range []string{"input", "state", "sr", "output", "stateN"} {
+		p.cStrings[name] = C.CString(name)
+	}
+
+	return p, nil
 }
 
 func (p *Provider) Name() string    { return "silero" }
@@ -132,14 +197,13 @@ func (p *Provider) Analyze(ctx context.Context, frame audio.Frame) ([]vad.Event,
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// int16 -> normalized float32, append to pending.
 	for _, s := range frame.Samples {
 		p.pending = append(p.pending, float32(s)/32768.0)
 	}
 
 	var events []vad.Event
 	for len(p.pending) >= windowSize {
-		window := p.pending[:windowSize]
+		window := append([]float32(nil), p.pending[:windowSize]...)
 		p.pending = p.pending[windowSize:]
 
 		prob, err := p.infer(window)
@@ -153,42 +217,123 @@ func (p *Provider) Analyze(ctx context.Context, frame audio.Frame) ([]vad.Event,
 	return events, nil
 }
 
-// infer runs one 512-sample window through the model and returns speech prob.
 func (p *Provider) infer(window []float32) (float32, error) {
-	copy(p.inputT.GetData(), window) // mutate reusable input tensor
-
-	err := p.session.Run(
-		[]ort.Value{p.inputT, p.stateT, p.srT},
-		[]ort.Value{p.probT, p.nstateT},
-	)
-	if err != nil {
-		return 0, fmt.Errorf("silero: run: %w", err)
+	pcm := window
+	if p.currSample > 0 {
+		pcm = append(p.ctx[:], window...)
 	}
+	copy(p.ctx[:], window[len(window)-contextLen:])
 
-	// carry recurrent state forward
-	copy(p.stateT.GetData(), p.nstateT.GetData())
-	return p.probT.GetData()[0], nil
+	inputShape := []C.int64_t{1, C.int64_t(len(pcm))}
+	var inputValue *C.OrtValue
+	if status := C.gosfu_create_float_tensor(
+		p.api,
+		p.memoryInfo,
+		(*C.float)(unsafe.Pointer(&pcm[0])),
+		C.size_t(len(pcm)),
+		(*C.int64_t)(unsafe.Pointer(&inputShape[0])),
+		C.size_t(len(inputShape)),
+		&inputValue,
+	); status != nil {
+		defer C.gosfu_release_status(p.api, status)
+		return 0, fmt.Errorf("silero: create input tensor: %s", C.GoString(C.gosfu_error_message(p.api, status)))
+	}
+	defer C.gosfu_release_value(p.api, inputValue)
+
+	stateShape := []C.int64_t{2, 1, 128}
+	var stateValue *C.OrtValue
+	if status := C.gosfu_create_float_tensor(
+		p.api,
+		p.memoryInfo,
+		(*C.float)(unsafe.Pointer(&p.state[0])),
+		C.size_t(len(p.state)),
+		(*C.int64_t)(unsafe.Pointer(&stateShape[0])),
+		C.size_t(len(stateShape)),
+		&stateValue,
+	); status != nil {
+		defer C.gosfu_release_status(p.api, status)
+		return 0, fmt.Errorf("silero: create state tensor: %s", C.GoString(C.gosfu_error_message(p.api, status)))
+	}
+	defer C.gosfu_release_value(p.api, stateValue)
+
+	rate := []C.int64_t{defaultRate}
+	rateShape := []C.int64_t{1}
+	var rateValue *C.OrtValue
+	if status := C.gosfu_create_int64_tensor(
+		p.api,
+		p.memoryInfo,
+		(*C.int64_t)(unsafe.Pointer(&rate[0])),
+		1,
+		(*C.int64_t)(unsafe.Pointer(&rateShape[0])),
+		C.size_t(len(rateShape)),
+		&rateValue,
+	); status != nil {
+		defer C.gosfu_release_status(p.api, status)
+		return 0, fmt.Errorf("silero: create sample-rate tensor: %s", C.GoString(C.gosfu_error_message(p.api, status)))
+	}
+	defer C.gosfu_release_value(p.api, rateValue)
+
+	inputs := []*C.OrtValue{inputValue, stateValue, rateValue}
+	outputs := []*C.OrtValue{nil, nil}
+	inputNames := []*C.char{p.cStrings["input"], p.cStrings["state"], p.cStrings["sr"]}
+	outputNames := []*C.char{p.cStrings["output"], p.cStrings["stateN"]}
+
+	if status := C.gosfu_run(
+		p.api,
+		p.session,
+		(**C.char)(unsafe.Pointer(&inputNames[0])),
+		(**C.OrtValue)(unsafe.Pointer(&inputs[0])),
+		C.size_t(len(inputs)),
+		(**C.char)(unsafe.Pointer(&outputNames[0])),
+		C.size_t(len(outputNames)),
+		(**C.OrtValue)(unsafe.Pointer(&outputs[0])),
+	); status != nil {
+		defer C.gosfu_release_status(p.api, status)
+		return 0, fmt.Errorf("silero: run: %s", C.GoString(C.gosfu_error_message(p.api, status)))
+	}
+	defer C.gosfu_release_value(p.api, outputs[0])
+	defer C.gosfu_release_value(p.api, outputs[1])
+
+	var probData unsafe.Pointer
+	if status := C.gosfu_tensor_data(p.api, outputs[0], &probData); status != nil {
+		defer C.gosfu_release_status(p.api, status)
+		return 0, fmt.Errorf("silero: output tensor data: %s", C.GoString(C.gosfu_error_message(p.api, status)))
+	}
+	var stateData unsafe.Pointer
+	if status := C.gosfu_tensor_data(p.api, outputs[1], &stateData); status != nil {
+		defer C.gosfu_release_status(p.api, status)
+		return 0, fmt.Errorf("silero: state tensor data: %s", C.GoString(C.gosfu_error_message(p.api, status)))
+	}
+	C.memcpy(unsafe.Pointer(&p.state[0]), stateData, C.size_t(stateLen*4))
+
+	prob := *(*float32)(probData)
+	p.lastProb = prob
+	p.currSample += windowSize
+	return prob, nil
 }
 
-// step applies hysteresis + silence timer and emits transitions.
 func (p *Provider) step(prob float32) (vad.Event, bool) {
+	minSilenceSamples := minSilenceMs * defaultRate / 1000
+
 	switch {
-	case prob >= speechThreshold && !p.speaking:
-		p.speaking = true
-		p.silentCount = 0
+	case prob >= speechThreshold && p.tempEnd != 0:
+		p.tempEnd = 0
+
+	case prob >= speechThreshold && !p.triggered:
+		p.triggered = true
 		return vad.Event{Type: vad.SpeechStart}, true
 
-	case prob >= silenceThreshold && p.speaking:
-		// still speaking (or borderline) — reset silence timer
-		p.silentCount = 0
-
-	case prob < silenceThreshold && p.speaking:
-		p.silentCount++
-		if p.silentCount >= minSilenceWindows {
-			p.speaking = false
-			p.silentCount = 0
-			return vad.Event{Type: vad.SpeechEnd}, true
+	case prob < silenceThreshold && p.triggered:
+		if p.tempEnd == 0 {
+			p.tempEnd = p.currSample
 		}
+		if p.currSample-p.tempEnd < minSilenceSamples {
+			return vad.Event{}, false
+		}
+
+		p.tempEnd = 0
+		p.triggered = false
+		return vad.Event{Type: vad.SpeechEnd}, true
 	}
 	return vad.Event{}, false
 }
@@ -196,26 +341,59 @@ func (p *Provider) step(prob float32) (vad.Event, bool) {
 func (p *Provider) Reset() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.speaking = false
-	p.silentCount = 0
+	p.currSample = 0
+	p.triggered = false
+	p.tempEnd = 0
+	p.lastProb = 0
 	p.pending = p.pending[:0]
-	// zero the recurrent state
-	for i := range p.stateT.GetData() {
-		p.stateT.GetData()[i] = 0
+	for i := range p.state {
+		p.state[i] = 0
+	}
+	for i := range p.ctx {
+		p.ctx[i] = 0
+	}
+}
+
+func (p *Provider) Diagnostics() vad.Diagnostics {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return vad.Diagnostics{
+		LastProbability:  p.lastProb,
+		Speaking:         p.triggered,
+		SilentCount:      0,
+		PendingSamples:   len(p.pending),
+		WindowSize:       windowSize,
+		SpeechThreshold:  speechThreshold,
+		SilenceThreshold: silenceThreshold,
 	}
 }
 
 func (p *Provider) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.api == nil {
+		return nil
+	}
+	if p.memoryInfo != nil {
+		C.gosfu_release_memory_info(p.api, p.memoryInfo)
+		p.memoryInfo = nil
+	}
 	if p.session != nil {
-		p.session.Destroy()
+		C.gosfu_release_session(p.api, p.session)
 		p.session = nil
 	}
-	p.inputT.Destroy()
-	p.stateT.Destroy()
-	p.srT.Destroy()
-	p.probT.Destroy()
-	p.nstateT.Destroy()
+	if p.sessionOpts != nil {
+		C.gosfu_release_session_options(p.api, p.sessionOpts)
+		p.sessionOpts = nil
+	}
+	if p.env != nil {
+		C.gosfu_release_env(p.api, p.env)
+		p.env = nil
+	}
+	for key, ptr := range p.cStrings {
+		C.free(unsafe.Pointer(ptr))
+		delete(p.cStrings, key)
+	}
+	p.api = nil
 	return nil
 }
