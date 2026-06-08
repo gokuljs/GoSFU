@@ -76,7 +76,7 @@ export function App() {
   }, [addLocalEvent, isCameraOn, view])
 
   return (
-    <div className="relative min-h-svh overflow-hidden bg-black">
+    <div className="relative min-h-svh overflow-hidden bg-[#050505]">
       <div
         className={`absolute inset-0 transition-opacity duration-500 ${
           view === "landing"

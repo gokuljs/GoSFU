@@ -63,16 +63,16 @@ export function RoomPage({
   onDisconnect,
 }: RoomPageProps) {
   return (
-    <div className="flex h-svh flex-col overflow-hidden bg-[#050506] text-white">
-      <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+    <div className="flex h-svh flex-col overflow-hidden bg-[#050505] text-white">
+      <header className="flex items-center justify-between border-b border-[#1a1a1a] px-4 py-3">
         <div className="flex items-center gap-2">
           <StatusDot state={connectionState} />
-          <span className="text-xs font-medium text-white/70">
+          <span className="text-[10px] font-medium tracking-wider text-white/50 uppercase">
             Client {labelForState(connectionState)}
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs font-medium tracking-wide text-white/40">
+          <span className="text-[10px] font-medium tracking-wider text-[#00d4aa]/60 uppercase">
             GO SFU DEBUG CONSOLE
           </span>
           <Controls
@@ -87,7 +87,7 @@ export function RoomPage({
 
       <main className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_16rem] gap-2 px-2 pt-2 pb-4 xl:grid-cols-[18rem_minmax(0,1fr)_20rem] xl:grid-rows-[minmax(0,1fr)_16rem]">
         <section className="grid min-h-0 gap-2 lg:grid-cols-2 xl:grid-cols-1">
-          <Panel title="User Video" detail={isMicOn ? "Mic live" : "Mic muted"}>
+          <Panel title="USER VIDEO" detail={isMicOn ? "MIC LIVE" : "MIC MUTED"}>
             <div className="space-y-3">
               <VideoTile stream={localStream} muted label="User" type="human" />
               <LiveWaveform
@@ -95,21 +95,21 @@ export function RoomPage({
                 height={42}
                 barWidth={2}
                 barGap={2}
-                barColor="rgba(168, 85, 247, 0.8)"
+                barColor="rgba(0, 212, 170, 0.8)"
                 mode="static"
                 fadeEdges
                 sensitivity={1.5}
               />
             </div>
           </Panel>
-          <Panel title="Bot Video" detail={remoteStream ? "Agent audio" : "Idle"}>
+          <Panel title="BOT VIDEO" detail={remoteStream ? "AGENT AUDIO" : "IDLE"}>
             <VideoTile stream={remoteStream} label="Agent" type="agent" />
           </Panel>
         </section>
 
         <Panel
-          title="Conversation"
-          detail={`${transcript.length} transcript item${transcript.length === 1 ? "" : "s"}`}
+          title="CONVERSATION"
+          detail={`${transcript.length} ITEM${transcript.length === 1 ? "" : "S"}`}
           className="min-h-0"
           bodyClassName="min-h-0"
         >
@@ -130,8 +130,8 @@ export function RoomPage({
         />
 
         <Panel
-          title="Events"
-          detail={`${debugEvents.length} captured`}
+          title="EVENTS"
+          detail={`${debugEvents.length} CAPTURED`}
           className="min-h-0 xl:col-span-3"
           bodyClassName="min-h-0"
         >
@@ -157,12 +157,12 @@ function Controls({
   | "onDisconnect"
 >) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       <Button
         onClick={onToggleMic}
         size="icon-lg"
-        variant={isMicOn ? "outline" : "destructive"}
-        className="rounded-full border-white/10"
+        variant="outline"
+        className={`border-[#1a1a1a] bg-[#0a0a0a] hover:border-[#00d4aa]/30 hover:bg-[#00d4aa]/5 ${isMicOn ? "text-[#00d4aa]" : "text-[#ff4444]"}`}
         aria-label={isMicOn ? "Mute microphone" : "Unmute microphone"}
       >
         {isMicOn ? (
@@ -174,8 +174,8 @@ function Controls({
       <Button
         onClick={onToggleCamera}
         size="icon-lg"
-        variant={isCameraOn ? "outline" : "destructive"}
-        className="rounded-full border-white/10"
+        variant="outline"
+        className={`border-[#1a1a1a] bg-[#0a0a0a] hover:border-[#00d4aa]/30 hover:bg-[#00d4aa]/5 ${isCameraOn ? "text-[#00d4aa]" : "text-[#ff4444]"}`}
         aria-label={isCameraOn ? "Turn off camera" : "Turn on camera"}
       >
         {isCameraOn ? (
@@ -187,8 +187,8 @@ function Controls({
       <Button
         onClick={onDisconnect}
         size="icon-lg"
-        variant="destructive"
-        className="rounded-full"
+        variant="outline"
+        className="border-[#1a1a1a] bg-[#0a0a0a] text-[#ff4444] hover:border-[#ff4444]/30 hover:bg-[#ff4444]/5"
         aria-label="Disconnect"
       >
         <PhoneDisconnect weight="fill" />
@@ -212,13 +212,13 @@ function Panel({
 }) {
   return (
     <section
-      className={`flex min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-white/[0.035] shadow-2xl shadow-black/30 ${className}`}
+      className={`flex min-h-0 flex-col overflow-hidden border border-[#1a1a1a] bg-[#0a0a0a] ${className}`}
     >
-      <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-        <h2 className="text-xs font-semibold tracking-wide text-white/80">
+      <div className="flex items-center justify-between border-b border-[#1a1a1a] px-3 py-2">
+        <h2 className="text-[10px] font-medium tracking-wider text-[#00d4aa] uppercase">
           {title}
         </h2>
-        {detail && <span className="text-[11px] text-white/35">{detail}</span>}
+        {detail && <span className="text-[10px] tracking-wider text-white/30 uppercase">{detail}</span>}
       </div>
       <div
         className={`flex min-h-0 flex-1 flex-col overflow-hidden p-3 ${bodyClassName}`}
@@ -244,14 +244,14 @@ function TranscriptPanel({
 
   if (transcript.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-white/10 bg-black/20 px-6 text-center">
+      <div className="flex h-full items-center justify-center border border-dashed border-[#1a1a1a] bg-[#050505] px-6 text-center">
         <div>
-          <p className="text-xs font-medium text-white/70">
+          <p className="text-[10px] font-medium tracking-wider text-white/40 uppercase">
             {connectionState === "connected" || connectionState === "connecting"
               ? "Waiting for live transcript"
               : "Connect a session to start the transcript"}
           </p>
-          <p className="mt-2 text-xs text-white/35">
+          <p className="mt-2 text-[10px] tracking-wide text-white/20">
             User interim/final STT and agent responses will appear here in real
             time.
           </p>
@@ -266,19 +266,19 @@ function TranscriptPanel({
         {transcript.map((item) => (
           <article
             key={item.id}
-            className={`max-w-[82%] rounded-2xl border px-3 py-2 ${
+            className={`max-w-[82%] border px-3 py-2 ${
               item.speaker === "user"
-                ? "self-start border-violet-400/20 bg-violet-500/10"
-                : "self-end border-emerald-400/20 bg-emerald-500/10"
+                ? "self-start border-[#00d4aa]/20 bg-[#00d4aa]/5"
+                : "self-end border-[#00d4aa]/30 bg-[#00d4aa]/10"
             }`}
           >
-            <div className="mb-1.5 flex items-center gap-2 text-[10px] uppercase tracking-wide text-white/35">
-              <span>{item.speaker === "user" ? "User" : "Bot"}</span>
-              {item.turn !== undefined && <span>Turn {item.turn}</span>}
+            <div className="mb-1.5 flex items-center gap-2 text-[9px] uppercase tracking-wider text-white/30">
+              <span>{item.speaker === "user" ? "USER" : "BOT"}</span>
+              {item.turn !== undefined && <span>TURN {item.turn}</span>}
               <span>{formatTime(item.ts)}</span>
-              {item.interim && <span className="text-violet-200">Interim</span>}
+              {item.interim && <span className="text-[#00d4aa]">INTERIM</span>}
             </div>
-            <p className="text-xs leading-5 text-white/85">{item.text}</p>
+            <p className="text-[11px] leading-5 text-white/70">{item.text}</p>
           </article>
         ))}
         <div ref={bottomRef} aria-hidden />
@@ -321,32 +321,32 @@ function SessionPanel({
   )
 
   return (
-    <Panel title="Session" detail="Live state" className="min-h-0" bodyClassName="min-h-0">
+    <Panel title="SESSION" detail="LIVE STATE" className="min-h-0" bodyClassName="min-h-0">
       <div className="h-full min-h-0 overflow-y-auto">
-        <div className="space-y-4">
-          <StatusRow label="Client" value={labelForState(connectionState)} />
-          <StatusRow label="Agent" value={agentStateLabel(peerConnectionState)} />
-          <StatusRow label="Debug WS" value={labelForState(debugStatus)} />
+        <div className="space-y-3">
+          <StatusRow label="CLIENT" value={labelForState(connectionState)} />
+          <StatusRow label="AGENT" value={agentStateLabel(peerConnectionState)} />
+          <StatusRow label="DEBUG WS" value={labelForState(debugStatus)} />
           <Divider />
-          <InfoRow label="Microphone" value={selectedDevices.audioInput} />
-          <InfoRow label="Camera" value={selectedDevices.videoInput} />
-          <InfoRow label="Audio Output" value={selectedDevices.audioOutput} />
+          <InfoRow label="MICROPHONE" value={selectedDevices.audioInput} />
+          <InfoRow label="CAMERA" value={selectedDevices.videoInput} />
+          <InfoRow label="AUDIO OUTPUT" value={selectedDevices.audioOutput} />
           <InfoRow
-            label="Device Counts"
+            label="DEVICE COUNTS"
             value={`${deviceCounts.audioinput} mic / ${deviceCounts.videoinput} camera / ${deviceCounts.audiooutput} output`}
           />
           <Divider />
-          <InfoRow label="Transport" value="WebRTC + WebSocket debug" />
-          <InfoRow label="Session ID" value={shortId(roomId)} title={roomId ?? ""} />
+          <InfoRow label="TRANSPORT" value="WebRTC + WebSocket debug" />
+          <InfoRow label="SESSION ID" value={shortId(roomId)} title={roomId ?? ""} />
           <InfoRow
-            label="Participant ID"
+            label="PARTICIPANT ID"
             value={shortId(participantId)}
             title={participantId ?? ""}
           />
-          <InfoRow label="Connection" value={peerConnectionState} />
+          <InfoRow label="CONNECTION" value={peerConnectionState} />
           <InfoRow label="ICE" value={iceConnectionState} />
-          <InfoRow label="Mic Track" value={isMicOn ? "enabled" : "muted"} />
-          <InfoRow label="Camera Track" value={isCameraOn ? "enabled" : "off"} />
+          <InfoRow label="MIC TRACK" value={isMicOn ? "enabled" : "muted"} />
+          <InfoRow label="CAMERA TRACK" value={isCameraOn ? "enabled" : "off"} />
         </div>
       </div>
     </Panel>
@@ -356,10 +356,10 @@ function SessionPanel({
 function StatusRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-xs text-white/45">{label}</span>
-      <span className="flex items-center gap-2 text-xs font-medium text-white/80">
+      <span className="text-[10px] tracking-wider text-white/40">{label}</span>
+      <span className="flex items-center gap-2 text-[10px] font-medium tracking-wider text-white/60">
         <StatusDot state={value} />
-        {value}
+        {value.toUpperCase()}
       </span>
     </div>
   )
@@ -376,10 +376,10 @@ function InfoRow({
 }) {
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-wide text-white/30">
+      <div className="text-[9px] tracking-wider text-white/25">
         {label}
       </div>
-      <div className="mt-1 truncate text-xs text-white/75" title={title ?? value}>
+      <div className="mt-0.5 truncate font-mono text-[10px] text-[#00d4aa]/70" title={title ?? value}>
         {value || "Unavailable"}
       </div>
     </div>
@@ -387,7 +387,7 @@ function InfoRow({
 }
 
 function Divider() {
-  return <div className="h-px bg-white/10" />
+  return <div className="h-px bg-[#1a1a1a]" />
 }
 
 function EventLogPanel({
@@ -429,35 +429,36 @@ function EventLogPanel({
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Filter events"
-          className="h-7 min-w-48 rounded-md border border-white/10 bg-black/30 px-2 text-xs text-white/80 outline-none placeholder:text-white/25 focus:border-white/25"
+          placeholder="FILTER EVENTS..."
+          className="h-6 min-w-48 border border-[#1a1a1a] bg-[#050505] px-2 font-mono text-[10px] text-[#00d4aa]/80 outline-none placeholder:text-white/20 focus:border-[#00d4aa]/30"
         />
         <select
           value={category}
           onChange={(event) => setCategory(event.target.value)}
-          className="h-7 rounded-md border border-white/10 bg-black/30 px-2 text-xs text-white/70 outline-none"
+          className="h-6 border border-[#1a1a1a] bg-[#050505] px-2 text-[10px] text-white/50 outline-none"
         >
-          <option value="all">All categories</option>
+          <option value="all">ALL CATEGORIES</option>
           {categories.map((item) => (
             <option key={item} value={item}>
-              {item}
+              {item.toUpperCase()}
             </option>
           ))}
         </select>
         <select
           value={level}
           onChange={(event) => setLevel(event.target.value)}
-          className="h-7 rounded-md border border-white/10 bg-black/30 px-2 text-xs text-white/70 outline-none"
+          className="h-6 border border-[#1a1a1a] bg-[#050505] px-2 text-[10px] text-white/50 outline-none"
         >
-          <option value="all">All levels</option>
-          <option value="debug">Debug</option>
-          <option value="info">Info</option>
-          <option value="warn">Warn</option>
-          <option value="error">Error</option>
+          <option value="all">ALL LEVELS</option>
+          <option value="debug">DEBUG</option>
+          <option value="info">INFO</option>
+          <option value="warn">WARN</option>
+          <option value="error">ERROR</option>
         </select>
         <Button
           variant="outline"
           size="sm"
+          className="h-6 border-[#1a1a1a] bg-[#050505] text-[10px] tracking-wider text-white/50 hover:border-[#00d4aa]/30 hover:text-[#00d4aa]"
           onClick={() => {
             if (paused) {
               setPaused(false)
@@ -467,20 +468,25 @@ function EventLogPanel({
             setPaused(true)
           }}
         >
-          {paused ? "Resume" : "Pause"}
+          {paused ? "RESUME" : "PAUSE"}
         </Button>
-        <Button variant="outline" size="sm" onClick={onClearEvents}>
-          Clear
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 border-[#1a1a1a] bg-[#050505] text-[10px] tracking-wider text-white/50 hover:border-[#00d4aa]/30 hover:text-[#00d4aa]"
+          onClick={onClearEvents}
+        >
+          CLEAR
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/10 bg-black/30">
+      <div className="min-h-0 flex-1 overflow-y-auto border border-[#1a1a1a] bg-[#050505]">
         {filteredEvents.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-xs text-white/35">
+          <div className="flex h-full items-center justify-center text-[10px] tracking-wider text-white/25 uppercase">
             No events match the current filters.
           </div>
         ) : (
-          <div className="divide-y divide-white/5">
+          <div className="divide-y divide-[#1a1a1a]">
             {filteredEvents.map((event) => (
               <EventRow event={event} key={event.id} />
             ))}
@@ -493,16 +499,16 @@ function EventLogPanel({
 
 function EventRow({ event }: { event: DebugEvent }) {
   return (
-    <div className="grid grid-cols-[4rem_5rem_9rem_minmax(0,1fr)] gap-3 px-3 py-2 text-xs">
-      <span className="font-mono text-white/35">{formatTime(event.ts)}</span>
-      <span className={levelClass(event.level)}>{event.level}</span>
-      <span className="truncate font-mono text-white/45" title={event.type}>
+    <div className="grid grid-cols-[4rem_4rem_9rem_minmax(0,1fr)] gap-3 px-3 py-1.5 text-[10px]">
+      <span className="font-mono text-white/25">{formatTime(event.ts)}</span>
+      <span className={levelClass(event.level)}>{event.level.toUpperCase()}</span>
+      <span className="truncate font-mono text-[#00d4aa]/50" title={event.type}>
         {event.type}
       </span>
       <div className="min-w-0">
-        <div className="truncate text-white/75">{event.message}</div>
+        <div className="truncate text-white/50">{event.message}</div>
         {event.attrs && (
-          <div className="mt-1 truncate font-mono text-[11px] text-white/30">
+          <div className="mt-0.5 truncate font-mono text-[9px] text-white/20">
             {attrSummary(event.attrs)}
           </div>
         )}
@@ -516,14 +522,14 @@ function StatusDot({ state }: { state: string }) {
     state.includes("failed") ||
     state.includes("closed") ||
     state.includes("disconnected")
-      ? "bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.7)]"
+      ? "bg-[#ff4444] shadow-[0_0_6px_rgba(255,68,68,0.6)]"
       : state.includes("connected") || state === "on" || state === "enabled"
-        ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"
+        ? "bg-[#00d4aa] shadow-[0_0_6px_rgba(0,212,170,0.6)]"
         : state.includes("connecting") || state.includes("checking")
-          ? "bg-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.7)]"
-          : "bg-white/30"
+          ? "bg-[#ffaa00] shadow-[0_0_6px_rgba(255,170,0,0.6)]"
+          : "bg-white/20"
 
-  return <span className={`h-2 w-2 rounded-full ${tone}`} />
+  return <span className={`h-1.5 w-1.5 rounded-full ${tone}`} />
 }
 
 function labelForState(state: string) {
@@ -559,13 +565,13 @@ function formatTime(value: string) {
 function levelClass(level: DebugEvent["level"]) {
   switch (level) {
     case "error":
-      return "font-semibold text-red-300"
+      return "font-medium text-[#ff4444]"
     case "warn":
-      return "font-semibold text-amber-200"
+      return "font-medium text-[#ffaa00]"
     case "debug":
-      return "text-sky-200"
+      return "text-white/30"
     default:
-      return "text-emerald-200"
+      return "text-[#00d4aa]"
   }
 }
 

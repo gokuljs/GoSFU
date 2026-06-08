@@ -82,7 +82,7 @@ export function VideoTile({
   const hasVideo = stream && stream.getVideoTracks().length > 0 && videoEnabled
 
   return (
-    <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-xl bg-black">
+    <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden border border-[#1a1a1a] bg-[#050505]">
       {type === "agent" && (
         <audio ref={audioRef} autoPlay playsInline className="hidden" />
       )}
@@ -100,14 +100,14 @@ export function VideoTile({
           <img
             src="/avatar.png"
             alt="You"
-            className="h-32 w-32 rounded-full object-cover opacity-90 sm:h-36 sm:w-36"
+            className="h-32 w-32 rounded-full object-cover opacity-70 sm:h-36 sm:w-36"
           />
         </div>
       ) : (
         <div className="flex flex-col items-center gap-5">
           <div className="h-36 w-36 overflow-hidden rounded-full sm:h-40 sm:w-40 md:h-44 md:w-44">
             <Orb
-              colors={["#6366f1", "#a78bfa"]}
+              colors={["#00d4aa", "#00b894"]}
               agentState={agentState}
               volumeMode="manual"
               outputVolumeRef={levelRef}
@@ -116,9 +116,9 @@ export function VideoTile({
           </div>
           <ShimmeringText
             text={stateLabel}
-            className="text-sm font-medium"
-            color="rgba(255, 255, 255, 0.4)"
-            shimmerColor="rgba(255, 255, 255, 0.9)"
+            className="text-[10px] font-medium tracking-wider uppercase"
+            color="rgba(255, 255, 255, 0.3)"
+            shimmerColor="rgba(0, 212, 170, 0.8)"
             duration={2}
             repeat={true}
             repeatDelay={0.5}
@@ -127,7 +127,7 @@ export function VideoTile({
         </div>
       )}
 
-      <div className="absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-1 text-[11px] font-medium text-white/50 backdrop-blur-sm">
+      <div className="absolute bottom-2 left-2 border border-[#1a1a1a] bg-[#050505]/80 px-2 py-0.5 text-[9px] font-medium tracking-wider text-[#00d4aa]/60 uppercase">
         {label}
       </div>
     </div>

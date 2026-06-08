@@ -37,7 +37,7 @@ export function DitherText({ text = "GO SFU", className }: DitherTextProps) {
       dimensionsRef.current = { width, height }
 
       const fontSize = Math.min(width * 0.2, height * 0.4, 180)
-      ctx.fillStyle = "#ffffff"
+      ctx.fillStyle = "#00d4aa"
       ctx.font = `900 ${fontSize}px "Inter Variable", sans-serif`
       ctx.textAlign = "center"
       ctx.textBaseline = "middle"
@@ -119,7 +119,7 @@ export function DitherText({ text = "GO SFU", className }: DitherTextProps) {
 
         ctx.beginPath()
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity})`
+        ctx.fillStyle = `rgba(0, 212, 170, ${p.opacity})`
         ctx.fill()
       }
 
