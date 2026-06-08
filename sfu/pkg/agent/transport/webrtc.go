@@ -17,7 +17,7 @@ type WebRTC struct {
 	playback chan audio.Frame
 }
 
-func NewWebrtc(pc *webrtc.PeerConnection) (*WebRTC, error) {
+func NewWebrtc(pc *webrtc.PeerConnection, roomID string) (*WebRTC, error) {
 	track, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
 		"audio", "agent",
@@ -29,7 +29,7 @@ func NewWebrtc(pc *webrtc.PeerConnection) (*WebRTC, error) {
 	if err != nil {
 		return nil, err
 	}
-	inbound, err := audio.NewInbound()
+	inbound, err := audio.NewInbound(roomID)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func NewWebrtc(pc *webrtc.PeerConnection) (*WebRTC, error) {
 		sender:   sender,
 		inbound:  inbound,
 		outbound: outbound,
-		pacer:    audio.NewFramePacer(playback, 8),
+		pacer:    audio.NewFramePacer(playback, 8, roomID),
 		playback: playback,
 	}, nil
 }

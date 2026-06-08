@@ -32,6 +32,7 @@ type Settings struct {
 type Config struct {
 	Plugins  Plugins
 	Settings Settings
+	RoomID   string
 }
 
 func DefaultSettings() Settings {

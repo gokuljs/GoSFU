@@ -29,7 +29,7 @@ func (m *Manager) Create() string {
 	m.mu.Lock()
 	m.rooms[id] = room
 	m.mu.Unlock()
-	slog.Info("room created", "roomId", id)
+	slog.Info("room created", "room", id)
 	return id
 }
 
@@ -44,5 +44,5 @@ func (m *Manager) Delete(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.rooms, id)
-	slog.Info("room deleted", "roomId", id)
+	slog.Info("room deleted", "room", id)
 }

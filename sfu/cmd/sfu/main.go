@@ -13,15 +13,16 @@ import (
 )
 
 func main() {
-	// Merge optional .env before flags/plugins read os.Getenv.
-	// Production injects env vars directly; .env is local-only.
+	port := flag.Int("port", config.DEFAULT_PORT, "http server port")
+	envName := flag.String("env", envOr("ENV", "local"), "environment (local|development|production)")
+	flag.Parse()
+
+	logger.Init(logger.EnvFromString(*envName))
+
+	// Merge optional .env after logger init so messages use the configured handler.
 	env.Load()
 
-	port := flag.Int("port", config.DEFAULT_PORT, "http server port")
-	envName := flag.String("env", envOr("ENV", "development"), "environment (development|production)")
-	flag.Parse()
-	logger.Init(logger.EnvFromString(*envName))
-	slog.Info("starting server", "port", *port)
+	slog.Info("starting server", "port", *port, "env", *envName)
 	manager := room.NewManager()
 	srv := server.New(*port, manager)
 

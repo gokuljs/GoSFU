@@ -4,9 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/gokuljs/goSfu/pkg/agent/audio"
 	"github.com/gokuljs/goSfu/pkg/agent/transport"
+	"github.com/gokuljs/goSfu/pkg/logger"
 	"github.com/gokuljs/goSfu/plugins/llm"
 	"github.com/gokuljs/goSfu/plugins/stt"
 	"github.com/gokuljs/goSfu/plugins/vad"
@@ -45,6 +47,8 @@ type Orchestrator struct {
 	state        convState
 	userSpeaking bool            // VAD: is the user currently talking
 	pending      strings.Builder // finalized STT text for the in-progress turn
+	turn         int
+	turnStart    time.Time // wall clock when current turn processing began
 }
 
 func NewOrchestrator(cfg Config, t transport.Transport) *Orchestrator {
@@ -55,12 +59,17 @@ func NewOrchestrator(cfg Config, t transport.Transport) *Orchestrator {
 	return o
 }
 
+func (o *Orchestrator) room() string { return o.cfg.RoomID }
+
 // Run is the conversation loop. It owns one STT session and one VAD instance
 // for the lifetime of the call and sequences turns: listen → respond → listen.
 func (o *Orchestrator) Run(ctx context.Context) {
 	sttSess, err := o.cfg.Plugins.STT.NewSession(ctx)
 	if err != nil {
-		slog.Error("stt session init failed", "error", err)
+		logger.Pipeline(slog.LevelError, logger.EventSTTSessionFailed,
+			"STT session init failed",
+			"room", o.room(), "error", err,
+		)
 		return
 	}
 	defer sttSess.Close()
@@ -112,12 +121,18 @@ func (o *Orchestrator) onAudio(ctx context.Context, sttSess stt.Session, frame a
 			case vad.SpeechStart:
 				if !o.userSpeaking {
 					o.userSpeaking = true
-					slog.Debug("turn: user started speaking")
+					logger.Pipeline(slog.LevelInfo, logger.EventVADSpeechStart,
+						"User started speaking",
+						"room", o.room(), "turn", o.turn+1,
+					)
 				}
 			case vad.SpeechEnd:
 				if o.userSpeaking {
 					o.userSpeaking = false
-					slog.Debug("turn: user stopped speaking")
+					logger.Pipeline(slog.LevelDebug, logger.EventVADSpeechEnd,
+						"User stopped speaking",
+						"room", o.room(), "turn", o.turn+1,
+					)
 					o.maybeEndTurn(ctx)
 				}
 			}
@@ -163,6 +178,13 @@ func (o *Orchestrator) maybeEndTurn(ctx context.Context) {
 	if text == "" {
 		return
 	}
+
+	o.turn++
+	logger.Pipeline(slog.LevelInfo, logger.EventTurnReady,
+		"Transcript ready — sending to LLM",
+		"room", o.room(), "turn", o.turn,
+		"text", text, "text_len", len(text),
+	)
 	o.handleUserText(ctx, text)
 }
 
@@ -170,25 +192,47 @@ func (o *Orchestrator) maybeEndTurn(ctx context.Context) {
 // → TTS → speaker. It blocks the Run loop until the reply finishes (half-duplex);
 // Phase 5 will move this onto a cancellable goroutine for barge-in.
 func (o *Orchestrator) handleUserText(ctx context.Context, userText string) {
-	slog.Info("user said", "text", userText)
+	o.turnStart = time.Now()
 	o.setState(stateResponding)
 	defer o.setState(stateListening)
 
+	logger.Pipeline(slog.LevelInfo, logger.EventLLMRequest,
+		"Sending transcript to LLM",
+		"room", o.room(), "turn", o.turn,
+		"text", userText,
+	)
+
 	o.history = append(o.history, llm.Message{Role: llm.RoleUser, Content: userText})
 
+	llmStart := time.Now()
 	stream, err := o.cfg.Plugins.LLM.StreamCompletion(ctx, o.history)
 	if err != nil {
-		slog.Error("llm stream failed", "error", err)
+		logger.Pipeline(slog.LevelError, logger.EventLLMFailed,
+			"LLM stream failed",
+			"room", o.room(), "turn", o.turn, "error", err,
+		)
 		return
 	}
 
 	chunker := newSentenceChunker(o.cfg.Settings.MaxChunkChars)
 	var full strings.Builder
+	var llmFirstToken bool
 
 	for chunk := range stream {
 		if chunk.Err != nil {
-			slog.Error("llm stream error", "error", chunk.Err)
+			logger.Pipeline(slog.LevelError, logger.EventLLMFailed,
+				"LLM stream error",
+				"room", o.room(), "turn", o.turn, "error", chunk.Err,
+			)
 			break
+		}
+		if !llmFirstToken && chunk.Delta != "" {
+			llmFirstToken = true
+			logger.Pipeline(slog.LevelInfo, logger.EventLLMFirstToken,
+				"LLM first token",
+				"room", o.room(), "turn", o.turn,
+				"ttfb_ms", time.Since(llmStart).Milliseconds(),
+			)
 		}
 		full.WriteString(chunk.Delta)
 		// Speak each completed sentence immediately so audio starts before the
@@ -209,11 +253,24 @@ func (o *Orchestrator) handleUserText(ctx context.Context, userText string) {
 		}
 	}
 
+	logger.Pipeline(slog.LevelInfo, logger.EventLLMComplete,
+		"LLM response complete",
+		"room", o.room(), "turn", o.turn,
+		"text_len", full.Len(),
+		"duration_ms", time.Since(llmStart).Milliseconds(),
+	)
+
 	// Half-duplex: only hand the turn back to listening once the user has
 	// actually heard the whole reply, not just when it was queued. speak()
 	// returns after frames are buffered; the audio is still draining through the
 	// pacer here.
 	_ = o.transport.WaitForPlayout(ctx)
+
+	logger.Pipeline(slog.LevelInfo, logger.EventTurnComplete,
+		"Turn complete — reply finished playing",
+		"room", o.room(), "turn", o.turn,
+		"e2e_ms", time.Since(o.turnStart).Milliseconds(),
+	)
 
 	o.history = append(o.history, llm.Message{Role: llm.RoleAssistant, Content: full.String()})
 }
@@ -225,23 +282,44 @@ func (o *Orchestrator) handleUserText(ctx context.Context, userText string) {
 // utterance StreamResampler converts to 48k without per-chunk drift, and a
 // SampleBuffer reframes the continuous stream into 20ms frames.
 func (o *Orchestrator) speak(ctx context.Context, text string) bool {
-	slog.Info("agent speaking", "text", text)
+	logger.Pipeline(slog.LevelInfo, logger.EventTTSRequest,
+		"TTS synthesizing sentence",
+		"room", o.room(), "turn", o.turn,
+		"text_preview", logger.Preview(text, 80),
+	)
 
+	ttsStart := time.Now()
 	chunks, err := o.cfg.Plugins.TTS.Synthesize(ctx, text)
 	if err != nil {
-		slog.Error("tts failed", "error", err)
+		logger.Pipeline(slog.LevelError, logger.EventTTSFailed,
+			"TTS failed",
+			"room", o.room(), "turn", o.turn, "error", err,
+		)
 		return true // skip this sentence, keep the conversation alive
 	}
 
 	rs := audio.NewStreamResampler(o.cfg.Plugins.TTS.SampleRate(), audio.WebrtcSampleRate)
 	reframe := audio.NewSampleBuffer(audio.WebrtcSampleRate)
 
+	var ttsFirstAudio bool
+
 	for chunk := range chunks {
 		if chunk.Err != nil {
-			slog.Error("tts chunk error", "error", chunk.Err)
+			logger.Pipeline(slog.LevelError, logger.EventTTSFailed,
+				"TTS chunk error",
+				"room", o.room(), "turn", o.turn, "error", chunk.Err,
+			)
 			break
 		}
 		if len(chunk.Samples) > 0 {
+			if !ttsFirstAudio {
+				ttsFirstAudio = true
+				logger.Pipeline(slog.LevelInfo, logger.EventTTSFirstAudio,
+					"TTS first audio",
+					"room", o.room(), "turn", o.turn,
+					"ttfb_ms", time.Since(ttsStart).Milliseconds(),
+				)
+			}
 			for _, f := range reframe.Push(rs.Process(chunk.Samples)) {
 				if !o.send(ctx, f) {
 					return false
@@ -263,7 +341,7 @@ func (o *Orchestrator) speak(ctx context.Context, text string) bool {
 
 func (o *Orchestrator) setState(s convState) {
 	if o.state != s {
-		slog.Debug("state change", "from", o.state, "to", s)
+		slog.Debug("state change", "room", o.room(), "from", o.state, "to", s)
 		o.state = s
 	}
 }

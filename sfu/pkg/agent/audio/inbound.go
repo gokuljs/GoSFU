@@ -9,7 +9,9 @@ package audio
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 
+	"github.com/gokuljs/goSfu/pkg/logger"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -23,11 +25,12 @@ type Inbound struct {
 	decoder *OpusDecoder  // fills the codec gap: Opus bytes → int16 PCM samples
 	buffer  *SampleBuffer // fills the framing gap: variable PCM → 20 ms Frame values
 	out     chan Frame    // fills the concurrency gap: Run produces, others consume
+	roomID  string
 }
 
 // NewInbound wires decoder, reframer, and output queue for a standard browser
 // mic track (48 kHz mono Opus).
-func NewInbound() (*Inbound, error) {
+func NewInbound(roomID string) (*Inbound, error) {
 	dec, err := NewOpusDecoder(WebrtcSampleRate, ChannelsMono)
 	if err != nil {
 		return nil, err
@@ -36,6 +39,7 @@ func NewInbound() (*Inbound, error) {
 		decoder: dec,
 		buffer:  NewSampleBuffer(WebrtcSampleRate),
 		out:     make(chan Frame, defaultInboundQueue),
+		roomID:  roomID,
 	}, nil
 }
 
@@ -47,8 +51,15 @@ func (p *Inbound) Frames() <-chan Frame { return p.out }
 // pushes them to Frames(). Start it in a goroutine; read from Frames() elsewhere.
 func (p *Inbound) Run(ctx context.Context, track *webrtc.TrackRemote) {
 	slog.Info("inbound audio started",
+		"room", p.roomID,
 		"codec", track.Codec().MimeType,
 		"clockRate", track.Codec().ClockRate,
+	)
+
+	var (
+		firstFrame   bool
+		dropped      atomic.Uint64
+		dropReported atomic.Bool
 	)
 
 	buf := make([]byte, 1500) // reuse buffer for each RTP read
@@ -61,7 +72,7 @@ func (p *Inbound) Run(ctx context.Context, track *webrtc.TrackRemote) {
 
 		n, _, err := track.Read(buf)
 		if err != nil {
-			slog.Info("inbound audio stopped", "error", err)
+			slog.Info("inbound audio stopped", "room", p.roomID, "error", err)
 			return
 		}
 
@@ -71,16 +82,30 @@ func (p *Inbound) Run(ctx context.Context, track *webrtc.TrackRemote) {
 		}
 
 		for _, frame := range p.buffer.Push(pcm) {
-			slog.Debug("inbound pcm",
-				"rms", RMS(frame.Samples),
-				"samples", len(frame.Samples),
-			)
+			if !firstFrame {
+				firstFrame = true
+				logger.Pipeline(slog.LevelInfo, logger.EventAudioFirstFrame,
+					"Audio reached server — STT is processing your audio",
+					"room", p.roomID,
+					"codec", track.Codec().MimeType,
+					"clock_rate", track.Codec().ClockRate,
+				)
+			}
 
 			select {
 			case p.out <- frame: // hand frame to consumer when queue has space
 			case <-ctx.Done():
 				return
 			default: // consumer too slow — drop frame rather than block WebRTC reads
+				dropped.Add(1)
+				if !dropReported.Load() {
+					dropReported.Store(true)
+					logger.Pipeline(slog.LevelWarn, logger.EventAudioFrameDrop,
+						"Inbound frame dropped — consumer too slow",
+						"room", p.roomID,
+						"dropped", dropped.Load(),
+					)
+				}
 			}
 		}
 	}

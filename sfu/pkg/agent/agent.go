@@ -9,6 +9,7 @@ import (
 	"log/slog"
 
 	"github.com/gokuljs/goSfu/pkg/agent/transport"
+	"github.com/gokuljs/goSfu/pkg/logger"
 )
 
 // Agent is the lifecycle owner: it wires a transport to an orchestrator and
@@ -18,6 +19,7 @@ type Agent struct {
 	cancel    context.CancelFunc
 	transport transport.Transport
 	orch      *Orchestrator
+	cfg       Config
 }
 
 // New builds an agent over any transport with a fully-resolved plugin config
@@ -30,15 +32,19 @@ func New(ctx context.Context, t transport.Transport, cfg Config) *Agent {
 		cancel:    cancel,
 		transport: t,
 		orch:      NewOrchestrator(cfg, t),
+		cfg:       cfg,
 	}
 }
 
 // Start brings up media flow then launches the conversation loop. Call once
 // the endpoint is connected.
 func (a *Agent) Start() {
-	slog.Info("agent starting")
+	logger.Pipeline(slog.LevelInfo, logger.EventAgentStart,
+		"Agent starting",
+		"room", a.cfg.RoomID,
+	)
 	if err := a.transport.Start(a.ctx); err != nil {
-		slog.Error("transport start failed", "error", err)
+		slog.Error("transport start failed", "room", a.cfg.RoomID, "error", err)
 		return
 	}
 	go a.orch.Run(a.ctx)
@@ -46,6 +52,10 @@ func (a *Agent) Start() {
 
 // Stop cancels every goroutine in the agent subtree and releases the transport.
 func (a *Agent) Stop() {
+	logger.Pipeline(slog.LevelInfo, logger.EventAgentStop,
+		"Agent stopped",
+		"room", a.cfg.RoomID,
+	)
 	a.cancel()
 	_ = a.transport.Close()
 }

@@ -3,7 +3,10 @@ package audio
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
+
+	"github.com/gokuljs/goSfu/pkg/logger"
 )
 
 // Pacer tuning. Mirrors LiveKit's AudioSource buffering strategy: a small jitter
@@ -33,18 +36,22 @@ const (
 //     actually been emitted (clean half-duplex turn handoff), and Clear to drop
 //     buffered audio for barge-in.
 type FramePacer struct {
-	in    <-chan Frame
-	out   chan Frame
-	drain chan chan struct{}
-	clear chan struct{}
+	in     <-chan Frame
+	out    chan Frame
+	drain  chan chan struct{}
+	clear  chan struct{}
+	roomID string
+
+	badRateOnce sync.Once
 }
 
-func NewFramePacer(in <-chan Frame, buf int) *FramePacer {
+func NewFramePacer(in <-chan Frame, buf int, roomID string) *FramePacer {
 	return &FramePacer{
-		in:    in,
-		out:   make(chan Frame, buf),
-		drain: make(chan chan struct{}),
-		clear: make(chan struct{}, 1),
+		in:     in,
+		out:    make(chan Frame, buf),
+		drain:  make(chan chan struct{}),
+		clear:  make(chan struct{}, 1),
+		roomID: roomID,
 	}
 }
 
@@ -61,6 +68,10 @@ func (p *FramePacer) WaitForDrain(ctx context.Context) error {
 	}
 	select {
 	case <-done:
+		logger.Pipeline(slog.LevelInfo, logger.EventPlayoutDrained,
+			"Playout drained",
+			"room", p.roomID,
+		)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -88,6 +99,7 @@ func (p *FramePacer) Run(ctx context.Context) {
 	var (
 		acc      []int16         // jitter buffer of pending PCM samples
 		playing  bool            // false while building the cushion / idle
+		wasPlay  bool            // track transitions for lifecycle logs
 		bufTicks int             // ticks spent buffering with data (start timeout)
 		waiters  []chan struct{} // pending WaitForDrain callers
 	)
@@ -121,6 +133,7 @@ func (p *FramePacer) Run(ctx context.Context) {
 				}
 			}
 			playing = false
+			wasPlay = false
 			bufTicks = 0
 			closeWaiters()
 
@@ -136,7 +149,12 @@ func (p *FramePacer) Run(ctx context.Context) {
 						return
 					}
 					if f.SampleRate != WebrtcSampleRate && f.SampleRate != 0 {
-						slog.Warn("pacer got non-48k frame; upstream should have resampled", "rate", f.SampleRate)
+						p.badRateOnce.Do(func() {
+							slog.Warn("pacer got non-48k frame; upstream should have resampled",
+								"room", p.roomID,
+								"rate", f.SampleRate,
+							)
+						})
 						continue
 					}
 					acc = append(acc, f.Samples...)
@@ -165,6 +183,19 @@ func (p *FramePacer) Run(ctx context.Context) {
 				default:
 					bufTicks = 0
 				}
+			}
+
+			if playing && !wasPlay {
+				wasPlay = true
+				bufferedMs := len(acc) * 1000 / WebrtcSampleRate
+				logger.Pipeline(slog.LevelInfo, logger.EventPlayoutStarted,
+					"Playout started",
+					"room", p.roomID,
+					"buffered_ms", bufferedMs,
+				)
+			}
+			if !playing {
+				wasPlay = false
 			}
 
 			switch {
