@@ -123,11 +123,14 @@ func (p *FramePacer) Run(ctx context.Context) {
 			waiters = append(waiters, w)
 
 		case <-p.clear:
+			bufferedMs := len(acc) * 1000 / WebrtcSampleRate
+			drainedFrames := 0
 			acc = acc[:0]
 		drainIn:
 			for {
 				select {
 				case <-p.in:
+					drainedFrames++
 				default:
 					break drainIn
 				}
@@ -136,6 +139,12 @@ func (p *FramePacer) Run(ctx context.Context) {
 			wasPlay = false
 			bufTicks = 0
 			closeWaiters()
+			logger.Pipeline(slog.LevelInfo, logger.EventPlayoutCleared,
+				"Playout cleared",
+				"room", p.roomID,
+				"buffered_ms", bufferedMs,
+				"drained_frames", drainedFrames,
+			)
 
 		case <-ticker.C:
 			// Top up the jitter buffer from the inbound channel, bounded by

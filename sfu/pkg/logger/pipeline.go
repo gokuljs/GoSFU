@@ -24,6 +24,8 @@ const (
 	EventTTSFirstAudio    = "pipeline.tts.first_audio"
 	EventPlayoutStarted   = "pipeline.playout.started"
 	EventPlayoutDrained   = "pipeline.playout.drained"
+	EventPlayoutCleared   = "pipeline.playout.cleared"
+	EventBargeIn          = "pipeline.barge_in"
 	EventTurnComplete     = "pipeline.turn.complete"
 	EventAudioFrameDrop   = "pipeline.audio.frame_drop"
 	EventAgentStart       = "pipeline.agent.start"

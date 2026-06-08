@@ -50,8 +50,18 @@ type Orchestrator struct {
 	turn         int
 	turnStart    time.Time // wall clock when current turn processing began
 
+	responseCancel context.CancelFunc
+	responseDone   <-chan responseResult
+
 	sttFrames       uint64
 	nextSTTLevelLog time.Time
+}
+
+type responseResult struct {
+	turn          int
+	assistantText string
+	completed     bool
+	interrupted   bool
 }
 
 func NewOrchestrator(cfg Config, t transport.Transport) *Orchestrator {
@@ -83,13 +93,13 @@ func (o *Orchestrator) Run(ctx context.Context) {
 	sttRate := o.cfg.Plugins.STT.SampleRate()
 	vadRate := o.cfg.Plugins.VAD.SampleRate()
 
-	// Greet the user as soon as the loop starts (also exercises the outbound path).
-	if g := strings.TrimSpace(o.cfg.Settings.GreetingText); g != "" {
-		o.speak(ctx, g)
-	}
-
 	in := o.transport.Inbound()
 	results := sttSess.Results()
+
+	// Greet the user as soon as the loop starts (also exercises the outbound path).
+	if g := strings.TrimSpace(o.cfg.Settings.GreetingText); g != "" {
+		o.startGreeting(ctx, g)
+	}
 
 	for {
 		select {
@@ -107,6 +117,9 @@ func (o *Orchestrator) Run(ctx context.Context) {
 				return
 			}
 			o.onTranscript(ctx, res)
+
+		case res := <-o.responseDone:
+			o.onResponseDone(res)
 		}
 	}
 }
@@ -124,6 +137,9 @@ func (o *Orchestrator) onAudio(ctx context.Context, sttSess stt.Session, frame a
 			case vad.SpeechStart:
 				if !o.userSpeaking {
 					o.userSpeaking = true
+					if o.state == stateResponding {
+						o.interruptResponse("vad_speech_start")
+					}
 					logger.Pipeline(slog.LevelInfo, logger.EventVADSpeechStart,
 						"User started speaking",
 						"room", o.room(), "turn", o.turn+1,
@@ -173,13 +189,21 @@ func (o *Orchestrator) onAudio(ctx context.Context, sttSess stt.Session, frame a
 }
 
 // onTranscript buffers finalized transcript segments for the current turn.
-// Interim (partial) results are ignored for now; a UI could surface them later.
+// Interim results are also useful as a barge-in signal while the agent is
+// speaking, because they arrive even when VAD misses the start of speech.
 func (o *Orchestrator) onTranscript(ctx context.Context, res stt.Result) {
-	if !res.IsFinal {
-		return
-	}
 	text := strings.TrimSpace(res.Text)
 	if text == "" {
+		return
+	}
+	if o.state == stateResponding {
+		reason := "stt_interim"
+		if res.IsFinal {
+			reason = "stt_final"
+		}
+		o.interruptResponse(reason)
+	}
+	if !res.IsFinal {
 		return
 	}
 	logger.Pipeline(slog.LevelDebug, logger.EventSTTResult,
@@ -206,6 +230,9 @@ func (o *Orchestrator) maybeEndTurn(ctx context.Context) {
 	if o.userSpeaking || o.pending.Len() == 0 {
 		return
 	}
+	if o.state == stateResponding {
+		return
+	}
 	text := strings.TrimSpace(o.pending.String())
 	o.pending.Reset()
 	if text == "" {
@@ -218,33 +245,77 @@ func (o *Orchestrator) maybeEndTurn(ctx context.Context) {
 		"room", o.room(), "turn", o.turn,
 		"text", text, "text_len", len(text),
 	)
-	o.handleUserText(ctx, text)
+	o.startResponse(ctx, text)
 }
 
-// handleUserText runs one full turn: user text → LLM stream → sentence chunks
-// → TTS → speaker. It blocks the Run loop until the reply finishes (half-duplex);
-// Phase 5 will move this onto a cancellable goroutine for barge-in.
-func (o *Orchestrator) handleUserText(ctx context.Context, userText string) {
+func (o *Orchestrator) startResponse(ctx context.Context, userText string) {
 	o.turnStart = time.Now()
 	o.setState(stateResponding)
-	defer o.setState(stateListening)
+
+	o.history = append(o.history, llm.Message{Role: llm.RoleUser, Content: userText})
+	history := append([]llm.Message(nil), o.history...)
+	turn := o.turn
+
+	respCtx, cancel := context.WithCancel(ctx)
+	done := make(chan responseResult, 1)
+	o.responseCancel = cancel
+	o.responseDone = done
+
+	go func() {
+		assistantText, completed := o.runResponse(respCtx, turn, o.turnStart, history, userText)
+		done <- responseResult{
+			turn:          turn,
+			assistantText: assistantText,
+			completed:     completed,
+			interrupted:   respCtx.Err() != nil && !completed,
+		}
+	}()
+}
+
+func (o *Orchestrator) startGreeting(ctx context.Context, text string) {
+	o.turnStart = time.Now()
+	o.setState(stateResponding)
+
+	respCtx, cancel := context.WithCancel(ctx)
+	done := make(chan responseResult, 1)
+	o.responseCancel = cancel
+	o.responseDone = done
+
+	go func() {
+		completed := o.speak(respCtx, 0, text)
+		if completed {
+			completed = o.transport.WaitForPlayout(respCtx) == nil
+		}
+		done <- responseResult{
+			turn:        0,
+			completed:   completed,
+			interrupted: respCtx.Err() != nil && !completed,
+		}
+	}()
+}
+
+// runResponse runs one full turn: user text → LLM stream → sentence chunks
+// → TTS → speaker. It runs off the main orchestrator loop so inbound VAD can
+// keep detecting barge-in while the agent is speaking.
+func (o *Orchestrator) runResponse(ctx context.Context, turn int, started time.Time, history []llm.Message, userText string) (string, bool) {
 
 	logger.Pipeline(slog.LevelInfo, logger.EventLLMRequest,
 		"Sending transcript to LLM",
-		"room", o.room(), "turn", o.turn,
+		"room", o.room(), "turn", turn,
 		"text", userText,
 	)
 
-	o.history = append(o.history, llm.Message{Role: llm.RoleUser, Content: userText})
-
 	llmStart := time.Now()
-	stream, err := o.cfg.Plugins.LLM.StreamCompletion(ctx, o.history)
+	stream, err := o.cfg.Plugins.LLM.StreamCompletion(ctx, history)
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", false
+		}
 		logger.Pipeline(slog.LevelError, logger.EventLLMFailed,
 			"LLM stream failed",
-			"room", o.room(), "turn", o.turn, "error", err,
+			"room", o.room(), "turn", turn, "error", err,
 		)
-		return
+		return "", false
 	}
 
 	chunker := newSentenceChunker(o.cfg.Settings.MaxChunkChars)
@@ -253,9 +324,12 @@ func (o *Orchestrator) handleUserText(ctx context.Context, userText string) {
 
 	for chunk := range stream {
 		if chunk.Err != nil {
+			if ctx.Err() != nil {
+				return "", false
+			}
 			logger.Pipeline(slog.LevelError, logger.EventLLMFailed,
 				"LLM stream error",
-				"room", o.room(), "turn", o.turn, "error", chunk.Err,
+				"room", o.room(), "turn", turn, "error", chunk.Err,
 			)
 			break
 		}
@@ -263,7 +337,7 @@ func (o *Orchestrator) handleUserText(ctx context.Context, userText string) {
 			llmFirstToken = true
 			logger.Pipeline(slog.LevelInfo, logger.EventLLMFirstToken,
 				"LLM first token",
-				"room", o.room(), "turn", o.turn,
+				"room", o.room(), "turn", turn,
 				"ttfb_ms", time.Since(llmStart).Milliseconds(),
 			)
 		}
@@ -271,8 +345,8 @@ func (o *Orchestrator) handleUserText(ctx context.Context, userText string) {
 		// Speak each completed sentence immediately so audio starts before the
 		// LLM has finished generating the whole reply.
 		for _, sentence := range chunker.push(chunk.Delta) {
-			if !o.speak(ctx, sentence) {
-				return // context cancelled mid-reply
+			if !o.speak(ctx, turn, sentence) {
+				return "", false // context cancelled mid-reply
 			}
 		}
 		if chunk.Done {
@@ -281,14 +355,14 @@ func (o *Orchestrator) handleUserText(ctx context.Context, userText string) {
 	}
 	// Flush the trailing partial sentence (or punctuation-free remainder).
 	for _, sentence := range chunker.flush() {
-		if !o.speak(ctx, sentence) {
-			return
+		if !o.speak(ctx, turn, sentence) {
+			return "", false
 		}
 	}
 
 	logger.Pipeline(slog.LevelInfo, logger.EventLLMComplete,
 		"LLM response complete",
-		"room", o.room(), "turn", o.turn,
+		"room", o.room(), "turn", turn,
 		"text_len", full.Len(),
 		"duration_ms", time.Since(llmStart).Milliseconds(),
 	)
@@ -297,15 +371,17 @@ func (o *Orchestrator) handleUserText(ctx context.Context, userText string) {
 	// actually heard the whole reply, not just when it was queued. speak()
 	// returns after frames are buffered; the audio is still draining through the
 	// pacer here.
-	_ = o.transport.WaitForPlayout(ctx)
+	if err := o.transport.WaitForPlayout(ctx); err != nil {
+		return "", false
+	}
 
 	logger.Pipeline(slog.LevelInfo, logger.EventTurnComplete,
 		"Turn complete — reply finished playing",
-		"room", o.room(), "turn", o.turn,
-		"e2e_ms", time.Since(o.turnStart).Milliseconds(),
+		"room", o.room(), "turn", turn,
+		"e2e_ms", time.Since(started).Milliseconds(),
 	)
 
-	o.history = append(o.history, llm.Message{Role: llm.RoleAssistant, Content: full.String()})
+	return full.String(), true
 }
 
 // speak renders one text chunk to audio and pushes it to the transport.
@@ -314,19 +390,22 @@ func (o *Orchestrator) handleUserText(ctx context.Context, userText string) {
 // Frequency handling lives here: TTS emits at its own native rate; a per-
 // utterance StreamResampler converts to 48k without per-chunk drift, and a
 // SampleBuffer reframes the continuous stream into 20ms frames.
-func (o *Orchestrator) speak(ctx context.Context, text string) bool {
+func (o *Orchestrator) speak(ctx context.Context, turn int, text string) bool {
 	logger.Pipeline(slog.LevelInfo, logger.EventTTSRequest,
 		"TTS synthesizing sentence",
-		"room", o.room(), "turn", o.turn,
+		"room", o.room(), "turn", turn,
 		"text_preview", logger.Preview(text, 80),
 	)
 
 	ttsStart := time.Now()
 	chunks, err := o.cfg.Plugins.TTS.Synthesize(ctx, text)
 	if err != nil {
+		if ctx.Err() != nil {
+			return false
+		}
 		logger.Pipeline(slog.LevelError, logger.EventTTSFailed,
 			"TTS failed",
-			"room", o.room(), "turn", o.turn, "error", err,
+			"room", o.room(), "turn", turn, "error", err,
 		)
 		return true // skip this sentence, keep the conversation alive
 	}
@@ -338,9 +417,12 @@ func (o *Orchestrator) speak(ctx context.Context, text string) bool {
 
 	for chunk := range chunks {
 		if chunk.Err != nil {
+			if ctx.Err() != nil {
+				return false
+			}
 			logger.Pipeline(slog.LevelError, logger.EventTTSFailed,
 				"TTS chunk error",
-				"room", o.room(), "turn", o.turn, "error", chunk.Err,
+				"room", o.room(), "turn", turn, "error", chunk.Err,
 			)
 			break
 		}
@@ -349,7 +431,7 @@ func (o *Orchestrator) speak(ctx context.Context, text string) bool {
 				ttsFirstAudio = true
 				logger.Pipeline(slog.LevelInfo, logger.EventTTSFirstAudio,
 					"TTS first audio",
-					"room", o.room(), "turn", o.turn,
+					"room", o.room(), "turn", turn,
 					"ttfb_ms", time.Since(ttsStart).Milliseconds(),
 				)
 			}
@@ -377,6 +459,40 @@ func (o *Orchestrator) setState(s convState) {
 		slog.Debug("state change", "room", o.room(), "from", o.state, "to", s)
 		o.state = s
 	}
+}
+
+func (o *Orchestrator) interruptResponse(reason string) {
+	if o.responseCancel == nil {
+		return
+	}
+	logger.Pipeline(slog.LevelInfo, logger.EventBargeIn,
+		"User interrupted agent speech",
+		"room", o.room(), "turn", o.turn,
+		"reason", reason,
+	)
+	o.responseCancel()
+	o.responseCancel = nil
+	o.transport.ClearPlayout()
+	o.setState(stateListening)
+}
+
+func (o *Orchestrator) onResponseDone(res responseResult) {
+	if res.interrupted {
+		logger.Pipeline(slog.LevelDebug, logger.EventBargeIn,
+			"Interrupted response worker stopped",
+			"room", o.room(), "turn", res.turn,
+		)
+	}
+	if res.completed && res.turn == o.turn && strings.TrimSpace(res.assistantText) != "" {
+		o.history = append(o.history, llm.Message{Role: llm.RoleAssistant, Content: res.assistantText})
+	}
+	if o.responseCancel != nil && res.turn == o.turn {
+		o.responseCancel = nil
+	}
+	if res.turn == o.turn && o.state == stateResponding {
+		o.setState(stateListening)
+	}
+	o.responseDone = nil
 }
 
 func (o *Orchestrator) send(ctx context.Context, f audio.Frame) bool {
