@@ -37,14 +37,16 @@ func NewWebrtc(pc *webrtc.PeerConnection) (*WebRTC, error) {
 	if err != nil {
 		return nil, err
 	}
-	playback := make(chan audio.Frame, 50)
+	// Small channel: the pacer's bounded jitter buffer is the real backpressure
+	// ceiling, so Send blocks once the pacer is full instead of dropping audio.
+	playback := make(chan audio.Frame, 8)
 	return &WebRTC{
 		pc:       pc,
 		track:    track,
 		sender:   sender,
 		inbound:  inbound,
 		outbound: outbound,
-		pacer:    audio.NewFramePacer(playback, 10),
+		pacer:    audio.NewFramePacer(playback, 8),
 		playback: playback,
 	}, nil
 }
@@ -53,13 +55,16 @@ func (t *WebRTC) HandleRemoteTrack(ctx context.Context, track *webrtc.TrackRemot
 	go t.inbound.Run(ctx, track)
 }
 func (t *WebRTC) Inbound() <-chan audio.Frame { return t.inbound.Frames() }
-func (t *WebRTC) Send(frame audio.Frame) error {
+func (t *WebRTC) Send(ctx context.Context, frame audio.Frame) error {
 	select {
 	case t.playback <- frame:
-	default: // playout buffer full — drop to avoid backpressure on caller
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return nil
 }
+func (t *WebRTC) WaitForPlayout(ctx context.Context) error { return t.pacer.WaitForDrain(ctx) }
+func (t *WebRTC) ClearPlayout()                            { t.pacer.Clear() }
 func (t *WebRTC) Start(ctx context.Context) error {
 	go t.drainRTCP(ctx)
 	go t.pacer.Run(ctx)
