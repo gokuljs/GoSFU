@@ -10,6 +10,7 @@ import (
 	"github.com/gokuljs/goSfu/pkg/agent"
 	"github.com/gokuljs/goSfu/pkg/agent/transport"
 	"github.com/gokuljs/goSfu/pkg/config"
+	"github.com/gokuljs/goSfu/pkg/roomquota"
 	"github.com/gokuljs/goSfu/pkg/roomstream"
 	"github.com/gokuljs/goSfu/pkg/sfu"
 	"github.com/google/uuid"
@@ -25,8 +26,9 @@ const (
 )
 
 var (
-	ErrRoomClosed = fmt.Errorf("room closed")
-	ErrRoomFull   = fmt.Errorf("room full")
+	ErrRoomClosed     = fmt.Errorf("room closed")
+	ErrRoomFull       = fmt.Errorf("room full")
+	ErrQuotaExhausted = fmt.Errorf("session quota exhausted")
 )
 
 type Participant struct {
@@ -47,6 +49,7 @@ type Room struct {
 	pc           *webrtc.PeerConnection
 	agent        *agent.Agent
 	stream       *roomstream.Hub
+	quota        *roomquota.Store
 }
 type JoinResult struct {
 	Sdp           webrtc.SessionDescription `json:"sdp"`
@@ -54,7 +57,7 @@ type JoinResult struct {
 	RoomId        string                    `json:"roomId"`
 }
 
-func NewRoom(id string, stream *roomstream.Hub, onClose func(string)) *Room {
+func NewRoom(id string, stream *roomstream.Hub, quota *roomquota.Store, onClose func(string)) *Room {
 	return &Room{
 		Id:           id,
 		State:        StateWaiting,
@@ -62,6 +65,7 @@ func NewRoom(id string, stream *roomstream.Hub, onClose func(string)) *Room {
 		audioPath:    config.DEFAULT_AUDIO_SAMPLE_FILE,
 		onClose:      onClose,
 		stream:       stream,
+		quota:        quota,
 	}
 }
 
@@ -74,6 +78,15 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription, systemPrompt string) 
 	}
 	if r.State == StateActive {
 		return nil, ErrRoomFull
+	}
+	if r.quota != nil && r.quota.IsExhausted(r.Id) {
+		state := r.quota.Get(r.Id)
+		r.stream.PublishQuota(r.Id, state)
+		r.stream.PublishEvent(r.Id, "session.quota.exhausted", "error", state.Message, map[string]any{
+			"used":  state.Used,
+			"limit": state.Limit,
+		})
+		return nil, ErrQuotaExhausted
 	}
 	participantId := uuid.New().String()
 	r.Participants = []Participant{{
@@ -118,6 +131,8 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription, systemPrompt string) 
 	cfg.RoomID = r.Id
 	cfg.TranscriptPublisher = r.stream
 	cfg.MetricsPublisher = r.stream
+	cfg.QuotaStore = r.quota
+	cfg.QuotaPublisher = r.stream
 
 	sessionCtx, cancel := context.WithCancel(context.Background())
 	r.ctx = sessionCtx

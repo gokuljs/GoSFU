@@ -40,6 +40,7 @@ const (
 	EventAgentStateChanged  = "pipeline.agent.state_changed"
 	EventAgentResponseStart = "pipeline.agent.response_started"
 	EventAgentResponseDone  = "pipeline.agent.response_done"
+	EventQuotaExceeded      = "session.quota.exhausted"
 )
 
 type PipelineSink func(level slog.Level, event, msg string, attrs ...any)

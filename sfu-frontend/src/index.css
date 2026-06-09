@@ -136,3 +136,25 @@
     @apply font-sans;
     }
 }
+
+@keyframes quota-bar-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 10px rgba(0, 212, 170, 0.55);
+  }
+  50% {
+    opacity: 0.35;
+    box-shadow: 0 0 2px rgba(0, 212, 170, 0.15);
+  }
+}
+
+.quota-bar-active {
+  animation: quota-bar-pulse 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quota-bar-active {
+    animation: none;
+    opacity: 0.8;
+  }
+}
