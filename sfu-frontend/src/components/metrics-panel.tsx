@@ -6,6 +6,7 @@ import {
 } from "@/components/metrics-chart"
 import { avgValue, buildSeries, latestValue, minValue } from "@/lib/metrics-series"
 import type { MetricPoint } from "@/hooks/use-room-stream"
+import { RateLimitMeter } from "@/components/rate-limit-meter"
 import { formatLocalTime } from "@/lib/format-time"
 
 const TEAL = "rgb(0, 212, 170)"
@@ -88,6 +89,7 @@ export function MetricsPanel({ metrics, latestByStage }: MetricsPanelProps) {
               (s) => s.id === PRIMARY_SPARK_BY_STAGE.tts
             )}
           />
+          <RateLimitMeter />
         </div>
       </PanelShell>
 
