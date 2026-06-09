@@ -5,7 +5,8 @@ import {
   type ChartSeries,
 } from "@/components/metrics-chart"
 import { avgValue, buildSeries, latestValue, minValue } from "@/lib/metrics-series"
-import type { MetricPoint } from "@/hooks/use-room-stream"
+import type { MetricPoint, QuotaState } from "@/hooks/use-room-stream"
+import { SessionQuotaMeter } from "@/components/session-quota-meter"
 import { formatLocalTime } from "@/lib/format-time"
 
 const TEAL = "rgb(0, 212, 170)"
@@ -50,9 +51,10 @@ const PRIMARY_SPARK_BY_STAGE = {
 interface MetricsPanelProps {
   metrics: MetricPoint[]
   latestByStage: Record<string, Record<string, MetricPoint>>
+  quota: QuotaState | null
 }
 
-export function MetricsPanel({ metrics, latestByStage }: MetricsPanelProps) {
+export function MetricsPanel({ metrics, latestByStage, quota }: MetricsPanelProps) {
   const [expanded, setExpanded] = useState(false)
 
   const latencySeries = useMemo(
@@ -88,6 +90,7 @@ export function MetricsPanel({ metrics, latestByStage }: MetricsPanelProps) {
               (s) => s.id === PRIMARY_SPARK_BY_STAGE.tts
             )}
           />
+          <SessionQuotaMeter quota={quota} />
         </div>
       </PanelShell>
 

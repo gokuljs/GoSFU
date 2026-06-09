@@ -65,6 +65,9 @@ func (s *Server) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 		case room.ErrRoomClosed:
 			slog.Warn("join rejected", "room", roomId, "reason", "room_closed")
 			http.Error(w, "room closed", http.StatusGone)
+		case room.ErrQuotaExhausted:
+			slog.Warn("join rejected", "room", roomId, "reason", "quota_exhausted")
+			http.Error(w, "session quota exhausted", http.StatusTooManyRequests)
 		default:
 			slog.Error("join failed", "room", roomId, "error", err)
 			http.Error(w, "join failed", http.StatusInternalServerError)

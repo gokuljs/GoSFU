@@ -2,6 +2,11 @@ import { useRef, useState, useCallback } from "react"
 
 export const SFU_URL = "http://localhost:8080"
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }]
+const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+}
 
 export type ConnectionState = "idle" | "connecting" | "connected" | "failed"
 export type PeerConnectionStateValue = RTCPeerConnectionState | "idle"
@@ -141,7 +146,7 @@ export function useWebRTC(): UseWebRTCReturn {
 
         const stream = await navigator.mediaDevices.getUserMedia({
           video: false,
-          audio: true,
+          audio: AUDIO_CONSTRAINTS,
         })
         if (connectGenerationRef.current !== generation) {
           stream.getTracks().forEach((track) => track.stop())

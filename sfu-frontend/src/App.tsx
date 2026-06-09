@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -14,6 +15,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom"
+import { Toaster, toast } from "sonner"
 import { LandingPage } from "@/pages/landing"
 import { RoomPage } from "@/pages/room"
 import { SFU_URL, useWebRTC } from "@/hooks/use-webrtc"
@@ -74,9 +76,9 @@ function RoomRoute() {
   const stream = useRoomStream(activeRoomId, SFU_URL)
   const { addLocalEvent } = stream
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
+  const exhaustedToastRoomRef = useRef<string | null>(null)
 
   useEffect(() => {
-    setSystemPrompt(DEFAULT_SYSTEM_PROMPT)
     return () => {
       disconnect()
     }
@@ -140,6 +142,24 @@ function RoomRoute() {
     })
   }, [addLocalEvent, routeRoomId, isCameraOn])
 
+  useEffect(() => {
+    if (!stream.quota?.exhausted) {
+      exhaustedToastRoomRef.current = null
+      return
+    }
+    const toastRoom = stream.quota.room || routeRoomId || "current"
+    if (exhaustedToastRoomRef.current === toastRoom) return
+
+    exhaustedToastRoomRef.current = toastRoom
+    toast.error("Session quota exhausted", {
+      id: `session-quota-${toastRoom}`,
+      description:
+        stream.quota.message ||
+        "You are out of usage quota. Further voice requests are blocked for this session.",
+      duration: 8000,
+    })
+  }, [routeRoomId, stream.quota])
+
   if (!routeRoomId) {
     return <Navigate to="/" replace />
   }
@@ -157,6 +177,7 @@ function RoomRoute() {
       debugEvents={stream.debugEvents}
       transcript={stream.transcript}
       metrics={stream.metrics}
+      quota={stream.quota}
       latestByStage={stream.latestByStage}
       onClearEvents={stream.clearEvents}
       isMicOn={isMicOn}
@@ -175,15 +196,29 @@ function RoomRoute() {
 
 export function App() {
   return (
-    <BrowserRouter>
-      <WebRTCProvider>
-        <Routes>
-          <Route path="/" element={<LandingRoute />} />
-          <Route path="/room/:roomId" element={<RoomRoute />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </WebRTCProvider>
-    </BrowserRouter>
+    <>
+      <BrowserRouter>
+        <WebRTCProvider>
+          <Routes>
+            <Route path="/" element={<LandingRoute />} />
+            <Route path="/room/:roomId" element={<RoomRoute />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </WebRTCProvider>
+      </BrowserRouter>
+      <Toaster
+        theme="dark"
+        position="top-right"
+        toastOptions={{
+          classNames: {
+            toast: "border border-[#1a1a1a] bg-[#0a0a0a] text-white",
+            title: "text-white",
+            description: "text-white/50",
+            error: "border-[#ff4444]/30",
+          },
+        }}
+      />
+    </>
   )
 }
 

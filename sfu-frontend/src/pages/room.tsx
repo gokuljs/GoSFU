@@ -25,6 +25,7 @@ import type {
 import type {
   DebugEvent,
   MetricPoint,
+  QuotaState,
   StreamConnectionState,
   TranscriptMessage,
 } from "@/hooks/use-room-stream"
@@ -50,6 +51,7 @@ interface RoomPageProps {
   debugEvents: DebugEvent[]
   transcript: TranscriptMessage[]
   metrics: MetricPoint[]
+  quota: QuotaState | null
   latestByStage: Record<string, Record<string, MetricPoint>>
   onClearEvents: () => void
   isMicOn: boolean
@@ -75,6 +77,7 @@ export function RoomPage({
   debugEvents,
   transcript,
   metrics,
+  quota,
   latestByStage,
   onClearEvents,
   isMicOn,
@@ -197,7 +200,11 @@ export function RoomPage({
             selectedDevices={selectedDevices}
             isMicOn={isMicOn}
           />
-          <MetricsPanel metrics={metrics} latestByStage={latestByStage} />
+          <MetricsPanel
+            metrics={metrics}
+            latestByStage={latestByStage}
+            quota={quota}
+          />
         </section>
 
         <Panel
