@@ -4,7 +4,11 @@
 
 WebRTC SFU with a voice agent debug console (Go server + React browser client).
 
-[![GoSFU demo video](https://img.youtube.com/vi/ZRbSO5N5Q8o/maxresdefault.jpg)](https://youtu.be/ZRbSO5N5Q8o?si=rxhzvA9pHx142EFH)
+## Demo Video
+
+[![Watch the GoSFU demo on YouTube](https://img.shields.io/badge/Watch%20demo-YouTube-red?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/ZRbSO5N5Q8o?si=rxhzvA9pHx142EFH)
+
+[![Watch the GoSFU demo video on YouTube](https://img.youtube.com/vi/ZRbSO5N5Q8o/maxresdefault.jpg)](https://youtu.be/ZRbSO5N5Q8o?si=rxhzvA9pHx142EFH)
 
 
 ## Prerequisites
