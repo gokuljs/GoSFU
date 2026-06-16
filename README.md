@@ -2,13 +2,15 @@
 
 > Work in progress — a better README is coming later.
 
-WebRTC SFU with a voice agent debug console (Go server + React browser client).
+This is a real-time WebRTC voice agent system built in Go and React. The browser streams microphone audio to a Go SFU backend, where it runs through voice activity detection, speech-to-text, an LLM, and text-to-speech, then sends the agent's voice back to the browser in real time.
+
+A big part of the work is the media pipeline: decoding browser Opus audio into PCM, converting between 48kHz WebRTC audio and 16kHz model audio, pacing bursty AI-generated speech into smooth 20ms frames, and handling buffering and backpressure so playback does not stutter.
+
+It also includes a live debug console that shows transcripts, connection states, pipeline events, latency metrics, and quota usage, so the voice agent can be inspected while the call is running.
 
 ## Demo Video
 
 [![Watch the GoSFU demo on YouTube](https://img.shields.io/badge/Watch%20demo-YouTube-red?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/ZRbSO5N5Q8o?si=rxhzvA9pHx142EFH)
-
-[![Watch the GoSFU demo video on YouTube](https://img.youtube.com/vi/ZRbSO5N5Q8o/maxresdefault.jpg)](https://youtu.be/ZRbSO5N5Q8o?si=rxhzvA9pHx142EFH)
 
 
 ## Prerequisites
