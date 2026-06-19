@@ -4,10 +4,12 @@ import (
 	"flag"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/gokuljs/goSfu/pkg/config"
 	"github.com/gokuljs/goSfu/pkg/env"
 	"github.com/gokuljs/goSfu/pkg/logger"
+	"github.com/gokuljs/goSfu/pkg/redisroom"
 	"github.com/gokuljs/goSfu/pkg/room"
 	"github.com/gokuljs/goSfu/pkg/server"
 )
@@ -18,12 +20,34 @@ func main() {
 	flag.Parse()
 
 	logger.Init(logger.EnvFromString(*envName))
-
-	// Merge optional .env after logger init so messages use the configured handler.
 	env.Load()
 
-	slog.Info("starting server", "port", *port, "env", *envName)
-	manager := room.NewManager()
+	sessionMax := parseDuration(envOr("SESSION_MAX_DURATION", "30m"), 30*time.Minute)
+	nodeID := envOr("NODE_ID", "local")
+	redisURL := os.Getenv("REDIS_URL")
+
+	var redisStore *redisroom.Store
+	redisMode := "fallback"
+	if redisURL != "" {
+		store, err := redisroom.NewStore(redisURL, nodeID)
+		if err != nil {
+			slog.Warn("redis unavailable, using in-memory fallback", "error", err)
+		} else if store != nil {
+			redisStore = store
+			redisMode = "enabled"
+			defer redisStore.Close()
+		}
+	}
+
+	slog.Info("starting server",
+		"port", *port,
+		"env", *envName,
+		"redis", redisMode,
+		"node_id", nodeID,
+		"session_max", sessionMax.String(),
+	)
+
+	manager := room.NewManager(redisStore, sessionMax)
 	srv := server.New(*port, manager)
 
 	if err := srv.ListenAndServe(); err != nil {
@@ -37,4 +61,12 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func parseDuration(raw string, def time.Duration) time.Duration {
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return def
+	}
+	return d
 }

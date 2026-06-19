@@ -1,6 +1,7 @@
 package roomstream
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -9,10 +10,12 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/gokuljs/goSfu/pkg/redisroom"
 	"github.com/gokuljs/goSfu/pkg/roomquota"
 	"github.com/gokuljs/goSfu/pkg/sessiondebug"
 	"github.com/gokuljs/goSfu/pkg/transcript"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -33,6 +36,11 @@ type Message struct {
 	Data    json.RawMessage `json:"data"`
 }
 
+type redisEnvelope struct {
+	Channel string          `json:"channel"`
+	Data    json.RawMessage `json:"data"`
+}
+
 type queuedMessage struct {
 	channel string
 	raw     json.RawMessage
@@ -43,13 +51,19 @@ type Hub struct {
 	mu          sync.RWMutex
 	subscribers map[string]map[chan queuedMessage]struct{}
 	history     map[string][]queuedMessage
+	redis       *redis.Client
 }
 
-func NewHub() *Hub {
+func NewHub(rdb *redis.Client) *Hub {
 	return &Hub{
 		subscribers: make(map[string]map[chan queuedMessage]struct{}),
 		history:     make(map[string][]queuedMessage),
+		redis:       rdb,
 	}
+}
+
+func (h *Hub) redisEnabled() bool {
+	return h != nil && h.redis != nil
 }
 
 func (h *Hub) PublishTranscript(room string, u transcript.Update) {
@@ -136,6 +150,22 @@ func (h *Hub) publish(channel, room string, data any, droppable bool) {
 
 	msg := queuedMessage{channel: channel, raw: raw}
 
+	if h.redisEnabled() {
+		env, err := json.Marshal(redisEnvelope{Channel: channel, Data: raw})
+		if err != nil {
+			slog.Warn("roomstream redis envelope failed", "channel", channel, "room", room, "error", err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err = h.redis.Publish(ctx, redisroom.LiveChannel(room), env).Err()
+		cancel()
+		if err != nil {
+			slog.Warn("roomstream redis publish failed", "channel", channel, "room", room, "error", err)
+		}
+		slog.Debug("stream sent", "channel", channel, "room", room, "bytes", len(raw), "via", "redis")
+		return
+	}
+
 	h.mu.Lock()
 	history := append(h.history[room], msg)
 	limit := historyLimit(channel)
@@ -156,11 +186,7 @@ func (h *Hub) publish(channel, room string, data any, droppable bool) {
 	}
 	h.mu.Unlock()
 
-	slog.Debug("stream sent",
-		"channel", channel,
-		"room", room,
-		"bytes", len(raw),
-	)
+	slog.Debug("stream sent", "channel", channel, "room", room, "bytes", len(raw), "via", "local")
 }
 
 func historyLimit(channel string) int {
@@ -176,6 +202,16 @@ func historyLimit(channel string) int {
 	}
 }
 
+func (h *Hub) ClearRoom(room string) {
+	if h == nil || strings.TrimSpace(room) == "" {
+		return
+	}
+	h.mu.Lock()
+	delete(h.history, room)
+	delete(h.subscribers, room)
+	h.mu.Unlock()
+}
+
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, room string) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
@@ -186,7 +222,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, room string) {
 	defer conn.Close(websocket.StatusNormalClosure, "room stream closed")
 
 	ctx := r.Context()
-	msgs, unsubscribe := h.Subscribe(room)
+	msgs, unsubscribe := h.Subscribe(ctx, room)
 	defer unsubscribe()
 
 	h.PublishEvent(room, "stream.websocket.connected", "info", "Room stream WebSocket connected", nil)
@@ -212,7 +248,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, room string) {
 	}
 }
 
-func (h *Hub) Subscribe(room string) (<-chan queuedMessage, func()) {
+func (h *Hub) Subscribe(ctx context.Context, room string) (<-chan queuedMessage, func()) {
 	ch := make(chan queuedMessage, 256)
 
 	h.mu.Lock()
@@ -220,17 +256,61 @@ func (h *Hub) Subscribe(room string) (<-chan queuedMessage, func()) {
 		h.subscribers[room] = make(map[chan queuedMessage]struct{})
 	}
 	h.subscribers[room][ch] = struct{}{}
-	history := append([]queuedMessage(nil), h.history[room]...)
+
+	var history []queuedMessage
+	if !h.redisEnabled() {
+		history = append([]queuedMessage(nil), h.history[room]...)
+	}
 	h.mu.Unlock()
 
-	if len(history) > cap(ch) {
-		history = history[len(history)-cap(ch):]
+	if !h.redisEnabled() {
+		if len(history) > cap(ch) {
+			history = history[len(history)-cap(ch):]
+		}
+		for _, msg := range history {
+			ch <- msg
+		}
 	}
-	for _, msg := range history {
-		ch <- msg
+
+	var (
+		redisSub   *redis.PubSub
+		cancelRedis context.CancelFunc
+		redisDone  sync.WaitGroup
+	)
+	if h.redisEnabled() {
+		var subCtx context.Context
+		subCtx, cancelRedis = context.WithCancel(ctx)
+		redisSub = h.redis.Subscribe(subCtx, redisroom.LiveChannel(room))
+		redisDone.Add(1)
+		go func() {
+			defer redisDone.Done()
+			for {
+				msg, err := redisSub.ReceiveMessage(subCtx)
+				if err != nil {
+					return
+				}
+				var env redisEnvelope
+				if err := json.Unmarshal([]byte(msg.Payload), &env); err != nil {
+					continue
+				}
+				select {
+				case ch <- queuedMessage{channel: env.Channel, raw: env.Data}:
+				case <-subCtx.Done():
+					return
+				default:
+				}
+			}
+		}()
 	}
 
 	return ch, func() {
+		if cancelRedis != nil {
+			cancelRedis()
+		}
+		if redisSub != nil {
+			_ = redisSub.Close()
+		}
+		redisDone.Wait()
 		h.mu.Lock()
 		if subs := h.subscribers[room]; subs != nil {
 			delete(subs, ch)

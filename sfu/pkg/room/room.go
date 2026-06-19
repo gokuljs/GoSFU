@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gokuljs/goSfu/pkg/agent"
 	"github.com/gokuljs/goSfu/pkg/agent/transport"
@@ -44,6 +45,10 @@ type Room struct {
 	Participants []Participant
 	audioPath    string
 	onClose      func(string)
+	onActivity   func(string)
+	onWaiting    func(string)
+	sessionMax   time.Duration
+	sessionTimer *time.Timer
 	ctx          context.Context
 	cancel       context.CancelFunc
 	pc           *webrtc.PeerConnection
@@ -51,19 +56,31 @@ type Room struct {
 	stream       *roomstream.Hub
 	quota        *roomquota.Store
 }
+
 type JoinResult struct {
 	Sdp           webrtc.SessionDescription `json:"sdp"`
 	ParticipantId string                    `json:"participantId"`
 	RoomId        string                    `json:"roomId"`
 }
 
-func NewRoom(id string, stream *roomstream.Hub, quota *roomquota.Store, onClose func(string)) *Room {
+func NewRoom(
+	id string,
+	stream *roomstream.Hub,
+	quota *roomquota.Store,
+	sessionMax time.Duration,
+	onClose func(string),
+	onActivity func(string),
+	onWaiting func(string),
+) *Room {
 	return &Room{
 		Id:           id,
 		State:        StateWaiting,
 		Participants: []Participant{},
 		audioPath:    config.DEFAULT_AUDIO_SAMPLE_FILE,
 		onClose:      onClose,
+		onActivity:   onActivity,
+		onWaiting:    onWaiting,
+		sessionMax:   sessionMax,
 		stream:       stream,
 		quota:        quota,
 	}
@@ -72,7 +89,6 @@ func NewRoom(id string, stream *roomstream.Hub, quota *roomquota.Store, onClose 
 func (r *Room) HandleJoin(offer webrtc.SessionDescription, systemPrompt string) (*JoinResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// check if the room is already full or already closed
 	if r.State == StateClosed {
 		return nil, ErrRoomClosed
 	}
@@ -110,9 +126,6 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription, systemPrompt string) 
 		return nil, err
 	}
 
-	// Provider wiring lives in code, not env. Only secrets (API keys) and
-	// machine-specific paths come from the environment, resolved inside each
-	// plugin's factory.
 	settings := agent.DefaultSettings()
 	if prompt := strings.TrimSpace(systemPrompt); prompt != "" {
 		settings.SystemPrompt = prompt
@@ -152,7 +165,6 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription, systemPrompt string) 
 			"codec":      track.Codec().MimeType,
 			"clock_rate": track.Codec().ClockRate,
 		})
-		// Audio only — keep video out of the Opus decoder.
 		if track.Kind() != webrtc.RTPCodecTypeAudio {
 			go r.drainTrack(sessionCtx, track)
 			return
@@ -181,7 +193,6 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription, systemPrompt string) 
 		return nil, err
 	}
 
-	// Job 7: create and set answer which need to be send back to browser and stuff
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
 		r.stopSessionLocked()
@@ -193,13 +204,16 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription, systemPrompt string) 
 		r.stopSessionLocked()
 		return nil, err
 	}
-	// basically waiting for all ice setup done
 	<-gatherComplete
 	r.State = StateActive
 	slog.Info("room active", "room", r.Id, "participant", participantId)
 	r.stream.PublishEvent(r.Id, "session.room.active", "info", "Room active", map[string]any{
 		"participant_id": participantId,
 	})
+	if r.onActivity != nil {
+		r.onActivity(r.Id)
+	}
+	r.startSessionTimerLocked()
 	return &JoinResult{
 		Sdp:           *pc.LocalDescription(),
 		ParticipantId: participantId,
@@ -207,8 +221,25 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription, systemPrompt string) 
 	}, nil
 }
 
+func (r *Room) startSessionTimerLocked() {
+	r.stopSessionTimerLocked()
+	if r.sessionMax <= 0 {
+		return
+	}
+	r.sessionTimer = time.AfterFunc(r.sessionMax, func() {
+		r.stream.PublishEvent(r.Id, "session.room.expired", "info", "Session max duration reached", nil)
+		r.Close()
+	})
+}
+
+func (r *Room) stopSessionTimerLocked() {
+	if r.sessionTimer != nil {
+		r.sessionTimer.Stop()
+		r.sessionTimer = nil
+	}
+}
+
 func (r *Room) drainTrack(ctx context.Context, track *webrtc.TrackRemote) {
-	// 1500 is MTU size in general
 	buf := make([]byte, 1500)
 	for {
 		select {
@@ -253,6 +284,7 @@ func (r *Room) Close() {
 }
 
 func (r *Room) stopSessionLocked() {
+	r.stopSessionTimerLocked()
 	hadSession := r.cancel != nil || r.agent != nil || r.pc != nil
 	if r.cancel != nil {
 		r.cancel()
@@ -278,6 +310,9 @@ func (r *Room) stopSessionLocked() {
 		if hadSession {
 			slog.Info("room session stopped", "room", r.Id)
 			r.stream.PublishEvent(r.Id, "session.room.waiting", "info", "Room waiting for session", nil)
+			if r.onWaiting != nil {
+				r.onWaiting(r.Id)
+			}
 		}
 	}
 }
