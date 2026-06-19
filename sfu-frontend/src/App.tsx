@@ -20,6 +20,7 @@ import { LandingPage } from "@/pages/landing"
 import { RoomPage } from "@/pages/room"
 import { SFU_URL, useWebRTC } from "@/hooks/use-webrtc"
 import { useRoomStream } from "@/hooks/use-room-stream"
+import { useSessionTimer } from "@/hooks/use-session-timer"
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/agent-defaults"
 
 type WebRTCContextValue = ReturnType<typeof useWebRTC>
@@ -77,12 +78,47 @@ function RoomRoute() {
   const { addLocalEvent } = stream
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const exhaustedToastRoomRef = useRef<string | null>(null)
+  const expiredHandledRef = useRef(false)
+  const sessionActive = connectionState === "connected"
+  const sessionTimer = useSessionTimer(sessionActive)
+
+  useEffect(() => {
+    expiredHandledRef.current = false
+  }, [routeRoomId])
 
   useEffect(() => {
     return () => {
       disconnect()
     }
   }, [routeRoomId, disconnect])
+
+  useEffect(() => {
+    if (connectionState !== "connected" && connectionState !== "connecting") {
+      return
+    }
+    const onLeave = () => {
+      if (!routeRoomId) return
+      navigator.sendBeacon(`${SFU_URL}/room/${routeRoomId}/leave`, "")
+    }
+    window.addEventListener("pagehide", onLeave)
+    return () => window.removeEventListener("pagehide", onLeave)
+  }, [connectionState, routeRoomId])
+
+  useEffect(() => {
+    const expired = stream.debugEvents.some(
+      (event) => event.type === "session.room.expired"
+    )
+    if (!expired || expiredHandledRef.current) return
+
+    expiredHandledRef.current = true
+    toast.error("Session ended", {
+      id: `session-expired-${routeRoomId ?? "room"}`,
+      description: "This room reached the maximum session duration.",
+      duration: 8000,
+    })
+    disconnect()
+    navigate("/")
+  }, [disconnect, navigate, routeRoomId, stream.debugEvents])
 
   const handleStartSession = useCallback(() => {
     if (!routeRoomId) return
@@ -190,6 +226,8 @@ function RoomRoute() {
       onStartSession={handleStartSession}
       onStopSession={handleStopSession}
       canEditPrompt={canEditPrompt}
+      sessionTimerLabel={sessionActive ? sessionTimer.label : null}
+      sessionTimerWarning={sessionTimer.isWarning}
     />
   )
 }

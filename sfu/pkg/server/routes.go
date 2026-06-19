@@ -12,6 +12,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("OPTIONS /room/{id}/session/stop", s.handleStopSession)
 	mux.HandleFunc("DELETE /room/{id}", s.handleDeleteRoom)
 	mux.HandleFunc("OPTIONS /room/{id}", s.handleDeleteRoom)
+	mux.HandleFunc("POST /room/{id}/leave", s.handleLeaveRoom)
+	mux.HandleFunc("OPTIONS /room/{id}/leave", s.handleLeaveRoom)
 	mux.HandleFunc("GET /room/{id}/stream", s.handleRoomStream)
 	mux.HandleFunc("OPTIONS /room/{id}/stream", s.handleRoomStream)
 	return loggingMiddleware(mux)

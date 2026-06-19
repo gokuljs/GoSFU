@@ -125,6 +125,30 @@ func (s *Server) handleDeleteRoom(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleLeaveRoom(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		setCORS(w)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	roomId := r.PathValue("id")
+	rm, ok := s.rooms.Get(roomId)
+	if !ok {
+		if s.rooms.Exists(roomId) {
+			http.Error(w, "room not on this node", http.StatusNotFound)
+			return
+		}
+		setCORS(w)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	rm.Close()
+	setCORS(w)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleRoomStream(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		setCORS(w)
@@ -133,7 +157,7 @@ func (s *Server) handleRoomStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	roomId := r.PathValue("id")
-	if _, ok := s.rooms.Get(roomId); !ok {
+	if !s.rooms.Exists(roomId) {
 		http.Error(w, "room not found", http.StatusNotFound)
 		return
 	}

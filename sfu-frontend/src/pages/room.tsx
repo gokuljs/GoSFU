@@ -64,6 +64,8 @@ interface RoomPageProps {
   onStartSession: () => void
   onStopSession: () => void
   canEditPrompt: boolean
+  sessionTimerLabel?: string | null
+  sessionTimerWarning?: boolean
 }
 
 export function RoomPage({
@@ -90,6 +92,8 @@ export function RoomPage({
   onStartSession,
   onStopSession,
   canEditPrompt,
+  sessionTimerLabel,
+  sessionTimerWarning,
 }: RoomPageProps) {
   const botHasAudio =
     !!remoteStream &&
@@ -103,6 +107,20 @@ export function RoomPage({
           <span className="text-[10px] font-medium tracking-wider text-white/50 uppercase">
             Client {labelForState(connectionState)}
           </span>
+          {sessionTimerLabel && (
+            <>
+              <span className="text-[10px] text-white/20">·</span>
+              <span
+                className={`text-[10px] font-medium tracking-wider uppercase ${
+                  sessionTimerWarning
+                    ? "text-amber-400/80"
+                    : "text-white/50"
+                }`}
+              >
+                {sessionTimerLabel}
+              </span>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {roomId && (
