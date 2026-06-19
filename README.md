@@ -17,6 +17,7 @@ It also includes a live debug console that shows transcripts, connection states,
 
 - **Node.js** 20+ (for the browser client)
 - **Go** 1.26+ (for the SFU server)
+- **Redis** 7+ (room state and live event streaming)
 - **ONNX Runtime** + Silero VAD model (for voice activity detection)
 
 ## First-time setup
@@ -55,6 +56,9 @@ Edit `sfu/.env` — never commit this file.
 | `RIME_API_KEY` | Text-to-speech |
 | `ONNXRUNTIME_LIB_PATH` | Silero VAD — path to `libonnxruntime` on your machine |
 | `SILERO_MODEL_PATH` | Silero VAD — path to `silero_vad.onnx` (see `sfu/assets/models/`) |
+| `REDIS_URL` | Redis connection URL (default: `redis://localhost:6379`) |
+| `NODE_ID` | Unique ID for this SFU instance (default: `local`) |
+| `SESSION_MAX_DURATION` | Max room session length, e.g. `30m` (default: `30m`) |
 
 Optional overrides (defaults are fine for local dev):
 
@@ -65,18 +69,42 @@ ENV=local
 
 See `sfu/.env.example` for Deepgram / Rime tuning options.
 
+### 4. Redis
+
+Install and start Redis before running the SFU server.
+
+**macOS (Homebrew)**
+
+```bash
+brew install redis
+brew services start redis
+```
+
+Verify Redis is running:
+
+```bash
+redis-cli ping
+# PONG
+```
+
 ## Run
 
-Start the **browser client first**, then the **server** (two terminals).
+Start **Redis** first, then the **browser client**, then the **server** (three terminals).
 
-**Terminal 1 — browser**
+**Terminal 1 — Redis** (skip if already running as a service)
+
+```bash
+redis-server
+```
+
+**Terminal 2 — browser**
 
 ```bash
 cd sfu-frontend
 npm run dev
 ```
 
-**Terminal 2 — server**
+**Terminal 3 — server**
 
 ```bash
 cd sfu
