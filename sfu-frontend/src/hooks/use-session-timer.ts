@@ -36,12 +36,6 @@ export function useSessionTimer(active: boolean) {
   )
   const [elapsedMs, setElapsedMs] = useState(0)
   const startedAtRef = useRef<number | null>(null)
-  const prevActiveRef = useRef(active)
-
-  if (prevActiveRef.current !== active) {
-    prevActiveRef.current = active
-    setElapsedMs(0)
-  }
 
   useEffect(() => {
     if (!active) {
@@ -51,17 +45,24 @@ export function useSessionTimer(active: boolean) {
 
     startedAtRef.current = Date.now()
 
-    const interval = window.setInterval(() => {
+    const update = () => {
       if (startedAtRef.current === null) return
       setElapsedMs(Date.now() - startedAtRef.current)
-    }, 1000)
+    }
 
-    return () => window.clearInterval(interval)
+    const timeout = window.setTimeout(update, 0)
+    const interval = window.setInterval(update, 1000)
+
+    return () => {
+      window.clearTimeout(timeout)
+      window.clearInterval(interval)
+    }
   }, [active])
 
-  const remainingMs = Math.max(0, maxDurationMs - elapsedMs)
+  const displayElapsedMs = active ? elapsedMs : 0
+  const remainingMs = Math.max(0, maxDurationMs - displayElapsedMs)
   const maxLabel = formatDuration(maxDurationMs)
-  const label = `${formatDuration(elapsedMs)} / ${maxLabel}`
+  const label = `${formatDuration(displayElapsedMs)} / ${maxLabel}`
 
   return {
     label,
