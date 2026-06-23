@@ -324,8 +324,8 @@ func (o *Orchestrator) logVADDiagnostics(frame audio.Frame) {
 }
 
 // onTranscript buffers finalized transcript segments for the current turn.
-// Interim results are also useful as a barge-in signal while the agent is
-// speaking, because they arrive even when VAD misses the start of speech.
+// Interim results are also useful during barge-in while VAD says the user is
+// speaking, because they arrive before final transcripts.
 func (o *Orchestrator) onTranscript(ctx context.Context, res stt.Result) {
 	text := strings.TrimSpace(res.Text)
 	if text == "" {
@@ -344,7 +344,9 @@ func (o *Orchestrator) onTranscript(ctx context.Context, res stt.Result) {
 		if res.IsFinal {
 			reason = "stt_final"
 		}
-		o.interruptResponse(reason)
+		if o.userSpeaking {
+			o.interruptResponse(reason)
+		}
 	}
 	if !res.IsFinal {
 		logger.Pipeline(slog.LevelDebug, logger.EventTranscriptInterim,
