@@ -39,6 +39,56 @@ func (b *SampleBuffer) Push(samples []int16) []Frame {
 	return out
 }
 
+// FlushPadded emits the final partial 20ms frame, padding the remainder with
+// silence. This prevents callers from dropping the tail of a finite utterance.
+func (b *SampleBuffer) FlushPadded() []Frame {
+	if len(b.pending) == 0 {
+		return nil
+	}
+	frameSamples := b.sampleRate * 20 / 1000
+	f := Frame{
+		Samples:    make([]int16, frameSamples),
+		SampleRate: b.sampleRate,
+	}
+	copy(f.Samples, b.pending)
+	b.pending = b.pending[:0]
+	return []Frame{f}
+}
+
+// FadeInPlace applies a short linear ramp at the start of a PCM buffer. It is
+// useful at synthetic utterance boundaries where the waveform may not begin
+// close to zero.
+func FadeInPlace(samples []int16, sampleRate, fadeMs int) {
+	applyFade(samples, sampleRate, fadeMs, true)
+}
+
+// FadeOutPlace applies a short linear ramp at the end of a PCM buffer. It keeps
+// a hard utterance boundary from ending on a non-zero waveform edge.
+func FadeOutPlace(samples []int16, sampleRate, fadeMs int) {
+	applyFade(samples, sampleRate, fadeMs, false)
+}
+
+func applyFade(samples []int16, sampleRate, fadeMs int, fadeIn bool) {
+	if len(samples) == 0 || sampleRate <= 0 || fadeMs <= 0 {
+		return
+	}
+	n := sampleRate * fadeMs / 1000
+	if n <= 1 {
+		return
+	}
+	if n > len(samples) {
+		n = len(samples)
+	}
+	for i := 0; i < n; i++ {
+		gain := float64(i) / float64(n-1)
+		idx := i
+		if !fadeIn {
+			idx = len(samples) - 1 - i
+		}
+		samples[idx] = int16(math.Round(float64(samples[idx]) * gain))
+	}
+}
+
 // RMS measures the average power of PCM samples, which is useful for checking
 // audio volume levels or detecting silence.
 func RMS(samples []int16) float64 {

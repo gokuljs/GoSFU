@@ -37,6 +37,10 @@ func TestProvider_NameAndSampleRate(t *testing.T) {
 // mockRimeServer speaks the ws3 protocol: it reads JSON messages and, on eos,
 // replies with one base64 PCM chunk followed by a done event.
 func mockRimeServer(t *testing.T, samples []int16) *httptest.Server {
+	return mockRimeServerChunks(t, [][]byte{int16ToBytesLE(samples)})
+}
+
+func mockRimeServerChunks(t *testing.T, chunks [][]byte) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
@@ -67,12 +71,13 @@ func mockRimeServer(t *testing.T, samples []int16) *httptest.Server {
 				continue
 			}
 			if msg["operation"] == "eos" {
-				raw := int16ToBytesLE(samples)
-				chunk, _ := json.Marshal(map[string]any{
-					"type": "chunk",
-					"data": base64.StdEncoding.EncodeToString(raw),
-				})
-				_ = c.Write(ctx, websocket.MessageText, chunk)
+				for _, raw := range chunks {
+					chunk, _ := json.Marshal(map[string]any{
+						"type": "chunk",
+						"data": base64.StdEncoding.EncodeToString(raw),
+					})
+					_ = c.Write(ctx, websocket.MessageText, chunk)
+				}
 
 				done, _ := json.Marshal(map[string]any{"type": "done"})
 				_ = c.Write(ctx, websocket.MessageText, done)
@@ -90,6 +95,58 @@ func TestSynthesize_streamsPCM(t *testing.T) {
 	p := New(Config{
 		APIKey:     "test-key",
 		BaseURL:    "ws" + strings.TrimPrefix(srv.URL, "http"), // ws://127.0.0.1:port
+		Model:      "mistv2",
+		Speaker:    "cove",
+		SampleRate: 24000,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch, err := p.Synthesize(ctx, "hello world")
+	if err != nil {
+		t.Fatalf("Synthesize: %v", err)
+	}
+
+	var got []int16
+	done := false
+	for c := range ch {
+		if c.Err != nil {
+			t.Fatalf("chunk error: %v", c.Err)
+		}
+		if c.Done {
+			done = true
+			break
+		}
+		got = append(got, c.Samples...)
+	}
+	if !done {
+		t.Fatal("expected Done chunk")
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d samples, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sample[%d] = %d, want %d", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSynthesize_preservesPCMAcrossOddByteChunks(t *testing.T) {
+	want := []int16{0, 100, -100, 32767, -32768, 42, -900}
+	raw := int16ToBytesLE(want)
+	srv := mockRimeServerChunks(t, [][]byte{
+		raw[:3],
+		raw[3:8],
+		raw[8:11],
+		raw[11:],
+	})
+	defer srv.Close()
+
+	p := New(Config{
+		APIKey:     "test-key",
+		BaseURL:    "ws" + strings.TrimPrefix(srv.URL, "http"),
 		Model:      "mistv2",
 		Speaker:    "cove",
 		SampleRate: 24000,
