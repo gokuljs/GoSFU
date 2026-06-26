@@ -28,6 +28,8 @@ const (
 	stateResponding                  // LLM + TTS are producing the agent's reply
 )
 
+const ttsBoundaryFadeMs = 5
+
 func (s convState) String() string {
 	switch s {
 	case stateListening:
@@ -644,6 +646,37 @@ func (o *Orchestrator) speak(ctx context.Context, turn int, text string) bool {
 	var ttsFirstAudio bool
 	var firstAudioAt time.Time
 	var lastAudioAt time.Time
+	var pendingFrame *audio.Frame
+	var sentFrames int
+
+	queueFrame := func(f audio.Frame) bool {
+		if pendingFrame == nil {
+			audio.FadeInPlace(f.Samples, f.SampleRate, ttsBoundaryFadeMs)
+			pending := f
+			pendingFrame = &pending
+			return true
+		}
+		if !o.send(ctx, *pendingFrame) {
+			return false
+		}
+		sentFrames++
+		pending := f
+		pendingFrame = &pending
+		return true
+	}
+
+	flushFrame := func() bool {
+		if pendingFrame == nil {
+			return true
+		}
+		audio.FadeOutPlace(pendingFrame.Samples, pendingFrame.SampleRate, ttsBoundaryFadeMs)
+		if !o.send(ctx, *pendingFrame) {
+			return false
+		}
+		sentFrames++
+		pendingFrame = nil
+		return true
+	}
 
 	for chunk := range chunks {
 		if chunk.Err != nil {
@@ -671,7 +704,7 @@ func (o *Orchestrator) speak(ctx context.Context, turn int, text string) bool {
 			}
 			lastAudioAt = now
 			for _, f := range reframe.Push(rs.Process(chunk.Samples)) {
-				if !o.send(ctx, f) {
+				if !queueFrame(f) {
 					return false
 				}
 			}
@@ -682,9 +715,26 @@ func (o *Orchestrator) speak(ctx context.Context, turn int, text string) bool {
 	}
 	// Drain the resampler tail.
 	for _, f := range reframe.Push(rs.Flush()) {
-		if !o.send(ctx, f) {
+		if !queueFrame(f) {
 			return false
 		}
+	}
+	for _, f := range reframe.FlushPadded() {
+		if !queueFrame(f) {
+			return false
+		}
+	}
+	if !flushFrame() {
+		return false
+	}
+	if sentFrames > 0 {
+		logger.Pipeline(slog.LevelDebug, logger.EventTTSFrameBoundary,
+			"TTS utterance frames queued",
+			"room", o.room(), "turn", turn,
+			"frames", sentFrames,
+			"fade_ms", ttsBoundaryFadeMs,
+			"text_preview", logger.Preview(text, 80),
+		)
 	}
 
 	synthesisMs := float64(time.Since(ttsStart).Milliseconds())

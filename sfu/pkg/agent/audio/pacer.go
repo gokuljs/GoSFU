@@ -233,6 +233,12 @@ func (p *FramePacer) Run(ctx context.Context) {
 
 			default:
 				// Nothing ready: emit comfort silence and (re)enter buffering.
+				if playing {
+					logger.Pipeline(slog.LevelDebug, logger.EventPlayoutUnderrun,
+						"Playout buffer underrun",
+						"room", p.roomID,
+					)
+				}
 				playing = false
 				p.emit(ctx, NewSilentFrame48k())
 			}

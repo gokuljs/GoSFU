@@ -127,6 +127,7 @@ func (p *Provider) Synthesize(ctx context.Context, text string) (<-chan tts.Chun
 			}
 		}
 
+		var pcmCarry []byte
 		for {
 			_, data, err := conn.Read(ctx)
 			if err != nil {
@@ -150,7 +151,11 @@ func (p *Provider) Synthesize(ctx context.Context, text string) (<-chan tts.Chun
 			switch msg.Type {
 			case "chunk":
 				raw, derr := base64.StdEncoding.DecodeString(msg.Data)
-				if derr != nil || len(raw) < 2 {
+				if derr != nil {
+					continue
+				}
+				raw, pcmCarry = alignPCMBytes(pcmCarry, raw)
+				if len(raw) < 2 {
 					continue
 				}
 				if !emit(tts.Chunk{Samples: bytesToInt16LE(raw)}) {
@@ -195,6 +200,20 @@ func writeJSON(ctx context.Context, conn *websocket.Conn, v any) error {
 		return err
 	}
 	return conn.Write(ctx, websocket.MessageText, b)
+}
+
+func alignPCMBytes(carry, b []byte) ([]byte, []byte) {
+	if len(carry) > 0 {
+		combined := make([]byte, 0, len(carry)+len(b))
+		combined = append(combined, carry...)
+		combined = append(combined, b...)
+		b = combined
+	}
+	if len(b)%2 == 0 {
+		return b, nil
+	}
+	nextCarry := append([]byte(nil), b[len(b)-1])
+	return b[:len(b)-1], nextCarry
 }
 
 func bytesToInt16LE(b []byte) []int16 {
