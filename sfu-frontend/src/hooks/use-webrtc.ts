@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback } from "react"
 
-export const SFU_URL = "http://localhost:8080"
+export const SFU_URL = import.meta.env.VITE_SFU_URL ?? "http://localhost:8080"
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }]
 const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,

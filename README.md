@@ -67,50 +67,62 @@ sfu-frontend/
 
 ## Quickstart
 
-**Requirements:** Go 1.26+, Node.js 20+, and API keys for the demo providers (OpenAI, Deepgram, Rime). ONNX Runtime and a Silero model are needed for voice activity detection. Redis is optional — leave `REDIS_URL` unset to use the in-memory fallback.
+**Requirements:** Go 1.26+, Node.js 20+. Redis is optional — leave `REDIS_URL` unset to use the in-memory fallback.
 
-Stub providers exist in the repo, but the demo path is wired to OpenAI, Deepgram, Rime, and Silero in `sfu/pkg/room/room.go`.
+### Get API keys
+
+The demo uses these providers. Get keys from each:
+
+| Role | Provider | Get a key |
+|------|----------|-----------|
+| LLM | OpenAI | [platform.openai.com](https://platform.openai.com/api-keys) |
+| Speech-to-text | Deepgram | [console.deepgram.com](https://console.deepgram.com/) |
+| Text-to-speech | Rime | [rime.ai](https://rime.ai) |
+
+Stub providers exist in the repo if you want to skip a provider and test without it.
+
+### Install ONNX Runtime
+
+Voice activity detection uses [Silero VAD](https://github.com/snakers4/silero-vad) via ONNX Runtime.
+
+macOS:
 
 ```bash
-# frontend
-cd sfu-frontend
-npm install
+brew install onnxruntime
+```
 
-# backend
-cd ../sfu
-go mod download
+Linux:
+
+```bash
+# Download from https://github.com/microsoft/onnxruntime/releases
+# Extract and copy headers to /usr/local/include and libs to /usr/local/lib
+```
+
+### Backend
+
+```bash
+cd sfu
+./scripts/download-model.sh
+go mod tidy
 cp .env.example .env
 ```
 
-Edit `sfu/.env` with your API keys (`OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, `RIME_API_KEY`, `SILERO_MODEL_PATH`). See `.env.example` for the full list.
+Edit `sfu/.env` — add your `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, and `RIME_API_KEY`. See `sfu/.env.example` for the full list.
 
 ```bash
-# start frontend
-cd sfu-frontend
-npm run dev
-
-# start backend (in another terminal)
-cd sfu
 go run ./cmd/sfu
 ```
 
+### Frontend (new terminal)
+
+```bash
+cd sfu-frontend
+cp .env.example .env
+npm install
+npm run dev
+```
+
 Open `http://localhost:3000`, click connect, and allow microphone access.
-
-## What To Look At
-
-The useful parts of the repo are the places where timing decisions are made.
-
-- `sfu/pkg/agent/orchestrator.go` — owns the listening/responding state and handles barge-in
-- `sfu/pkg/agent/audio/pacer.go` — converts bursty generated audio into a steady 20 ms playout clock
-- `sfu/pkg/agent/audio/resample.go` — frame-level and streaming resampling
-- `sfu/pkg/agent/transport/webrtc.go` — separates the WebRTC boundary from the agent logic
-- `sfu/pkg/roomstream/hub.go` — streams transcripts, debug events, metrics, and quota updates
-- `sfu-frontend/src/pages/room.tsx` — the live debug console
-- `sfu-frontend/src/components/metrics-panel.tsx` — latency and pipeline metrics
-
-## Current State
-
-This is early software. It works end to end, but the goal is to keep the core readable and honest rather than to cover every production edge case.
 
 ## Contributing
 

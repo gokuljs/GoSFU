@@ -2,19 +2,39 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"runtime"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
 
 func main() {
-	ort.SetSharedLibraryPath("/opt/homebrew/lib/libonnxruntime.dylib")
-	ort.GetInputOutputInfo("assets/models/silero_vad.onnx")
+	libPath := os.Getenv("ONNXRUNTIME_LIB_PATH")
+	if libPath == "" {
+		switch runtime.GOOS {
+		case "darwin":
+			if runtime.GOARCH == "arm64" {
+				libPath = "/opt/homebrew/lib/libonnxruntime.dylib"
+			} else {
+				libPath = "/usr/local/lib/libonnxruntime.dylib"
+			}
+		default:
+			libPath = "/usr/local/lib/libonnxruntime.so"
+		}
+	}
+
+	modelPath := os.Getenv("SILERO_MODEL_PATH")
+	if modelPath == "" {
+		modelPath = "assets/models/silero_vad.onnx"
+	}
+
+	ort.SetSharedLibraryPath(libPath)
 	if err := ort.InitializeEnvironment(); err != nil {
 		panic(err)
 	}
 	defer ort.DestroyEnvironment()
 
-	in, out, err := ort.GetInputOutputInfo("assets/models/silero_vad.onnx")
+	in, out, err := ort.GetInputOutputInfo(modelPath)
 	if err != nil {
 		panic(err)
 	}

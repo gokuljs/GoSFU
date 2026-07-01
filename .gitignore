@@ -75,4 +75,6 @@ tmp/
 # Generated files
 *.pb.go
 *.gen.go
-.env
+
+# ONNX models (download via scripts/download-model.sh)
+*.onnx
