@@ -118,8 +118,8 @@ go run ./cmd/sfu
 ```bash
 cd sfu-frontend
 cp .env.example .env
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 Open `http://localhost:3000`, click connect, and allow microphone access.
