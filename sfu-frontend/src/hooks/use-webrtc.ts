@@ -1,7 +1,19 @@
 import { useRef, useState, useCallback } from "react"
 
-export const SFU_URL = "http://localhost:8080"
-const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }]
+export const SFU_URL = import.meta.env.VITE_SFU_URL ?? "http://localhost:8080"
+const DEFAULT_STUN_URLS = [
+  "stun:stun.l.google.com:19302",
+  "stun:stun1.l.google.com:19302",
+  "stun:stun.cloudflare.com:3478",
+]
+const STUN_URLS: string[] = (
+  import.meta.env.VITE_STUN_URLS ?? DEFAULT_STUN_URLS.join(",")
+)
+  .split(",")
+  .map((url: string) => url.trim())
+  .filter(Boolean)
+const ICE_SERVERS = [{ urls: STUN_URLS }]
+const ICE_GATHERING_TIMEOUT_MS = 3000
 const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
@@ -45,11 +57,28 @@ function waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
       resolve()
       return
     }
-    pc.addEventListener("icegatheringstatechange", () => {
+
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      window.clearTimeout(timeout)
+      pc.removeEventListener("icegatheringstatechange", onStateChange)
+      resolve()
+    }
+    const onStateChange = () => {
       if (pc.iceGatheringState === "complete") {
-        resolve()
+        finish()
       }
-    })
+    }
+    const timeout = window.setTimeout(() => {
+      console.warn(
+        `ICE gathering did not complete within ${ICE_GATHERING_TIMEOUT_MS}ms; sending offer with available candidates.`,
+      )
+      finish()
+    }, ICE_GATHERING_TIMEOUT_MS)
+
+    pc.addEventListener("icegatheringstatechange", onStateChange)
   })
 }
 

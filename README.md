@@ -1,121 +1,150 @@
 # GoSFU
 
-> Work in progress — a better README is coming later.
+A forkable WebRTC voice agent server in Go.
 
-This is a real-time WebRTC voice agent system built in Go and React. The browser streams microphone audio to a Go SFU backend, where it runs through voice activity detection, speech-to-text, an LLM, and text-to-speech, then sends the agent's voice back to the browser in real time.
+Handles the audio transport, turn orchestration, pacing, and barge-in so you can focus on your agent logic.
 
-A big part of the work is the media pipeline: decoding browser Opus audio into PCM, converting between 48kHz WebRTC audio and 16kHz model audio, pacing bursty AI-generated speech into smooth 20ms frames, and handling buffering and backpressure so playback does not stutter.
+[![license](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE) [![version](https://img.shields.io/badge/version-v0-orange)](https://github.com/gokuljs/goSfu) [![demo](https://img.shields.io/badge/demo-YouTube-FF0000?logo=youtube&logoColor=white)](https://youtu.be/ZRbSO5N5Q8o?si=rxhzvA9pHx142EFH)
 
-It also includes a live debug console that shows transcripts, connection states, pipeline events, latency metrics, and quota usage, so the voice agent can be inspected while the call is running.
+The interesting part is not that it connects a speech model, a language model, and a voice model. That wiring is the easy part. The hard part is what happens between the microphone and the speaker while the clock is running.
 
-## Demo Video
+Browser audio arrives as Opus over WebRTC. The server decodes it into PCM, resamples it for the parts of the system that need a different clock rate, watches for speech boundaries, waits for a complete user turn, streams a response, turns that response back into audio, reframes it into 20 ms chunks, paces it, and sends it back over WebRTC without stuttering.
 
-[![Watch the GoSFU demo on YouTube](https://img.shields.io/badge/Watch%20demo-YouTube-red?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/ZRbSO5N5Q8o?si=rxhzvA9pHx142EFH)
+If the user interrupts while the agent is speaking, the current response is cancelled and the queued audio is cleared. The system goes back to listening.
 
+That loop is the project.
 
-## Prerequisites
+Most voice agent examples hide the part where time becomes a problem. A text system can wait. A voice system cannot. If audio arrives too early, too late, in the wrong sample rate, in uneven chunks, or after the user has already started talking again, the user hears the bug immediately. This repo keeps those moving parts visible.
 
-- **Node.js** 20+ (for the browser client)
-- **Go** 1.26+ (for the SFU server)
-- **Redis** 7+ (room state and live event streaming)
-- **ONNX Runtime** + Silero VAD model (for voice activity detection)
+It is meant to be forked. Read the orchestrator, swap the providers, change the turn logic, deploy your own version. The debug console shows what the system is doing while the call is running, so you can see the effect of your changes immediately.
 
-## First-time setup
+I wrote more about the audio side in [When Latency Becomes Audible](https://gokuljs.com/blogs/when-latency-becomes-audible).
 
-### 1. Browser client
+**Features:**
 
-```bash
-cd sfu-frontend
-npm install
+- **WebRTC transport** — Opus encode/decode, 48 kHz to model-friendly resampling, 20 ms frame buffering
+- **Turn orchestration** — single-owner state machine for listening, responding, and barge-in
+- **Audio pacing** — frame pacer that turns bursty generated audio into a steady playout clock with backpressure
+- **Streaming pipeline** — chunked response output, streaming resampling, fade-in/out at utterance boundaries
+- **Provider interfaces** — pluggable LLM, STT, TTS, and VAD behind clean contracts. Swap vendors without touching the transport layer
+- **Live debug console** — browser UI for transcripts, events, latency metrics, connection state, and session quota
+- **Redis or in-memory** — Redis-backed room state and event fanout for multi-process deployments, with an in-memory fallback for local dev
+
+## The Core Loop
+
+```text
+Browser mic
+  -> WebRTC Opus packets
+  -> server-side PCM frames
+  -> turn detection and transcript collection
+  -> response generation
+  -> generated PCM audio
+  -> resample, reframe, fade, pace
+  -> WebRTC Opus packets
+  -> browser speaker
 ```
 
-Runs on **http://localhost:3000** (Vite). The client talks to the server at `http://localhost:8080`.
+While the agent is speaking, inbound audio is still monitored. If speech starts again, the server cancels the response path, clears the playout buffer, and returns to listening.
 
-### 2. Server
+## Repository Layout
+
+```text
+sfu/
+  cmd/sfu/              server entrypoint
+  pkg/agent/            conversation orchestrator
+  pkg/agent/audio/      frames, resampling, buffering, pacing, Opus helpers
+  pkg/agent/transport/  WebRTC transport boundary
+  pkg/room/             room lifecycle
+  pkg/roomstream/       live transcript/debug/metric streams
+  pkg/redisroom/        Redis room registry and pub/sub channel names
+  plugins/              provider interfaces and implementations
+
+sfu-frontend/
+  src/pages/room.tsx    debug console
+  src/hooks/            WebRTC and room stream hooks
+  src/components/       metrics, transcript, session, and audio UI
+```
+
+## Quickstart
+
+**Requirements:** Go 1.26+, Node.js 20+. Redis is optional — leave `REDIS_URL` unset to use the in-memory fallback.
+
+### Get API keys
+
+The demo room uses these providers and requires keys from each:
+
+| Role | Provider | Get a key |
+|------|----------|-----------|
+| LLM | OpenAI | [platform.openai.com](https://platform.openai.com/api-keys) |
+| Speech-to-text | Deepgram | [console.deepgram.com](https://console.deepgram.com/) |
+| Text-to-speech | Rime | [rime.ai](https://rime.ai) |
+
+Stub providers exist in the repo for provider development and custom agent wiring, but the checked-in room demo uses OpenAI, Deepgram, Rime, and Silero VAD.
+
+To use a different vendor, add a provider implementation under `sfu/plugins/`, register it with the matching plugin package, and wire it into the agent config. Provider names only work after their plugin exists.
+
+### Install ONNX Runtime
+
+Voice activity detection uses [Silero VAD](https://github.com/snakers4/silero-vad) via ONNX Runtime.
+
+There are two separate pieces:
+
+- **ONNX Runtime** is platform-specific. Install the build for your OS and CPU.
+- **`silero_vad.onnx`** is the model file. It is the same on macOS and Linux, and `./scripts/download-model.sh` downloads it later.
+
+macOS:
+
+```bash
+brew install onnxruntime
+```
+
+Linux:
+
+```bash
+ORT_VERSION=1.18.1
+ORT_ARCH=linux-x64 # use linux-aarch64 for ARM64 Linux
+
+curl -LO "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-${ORT_ARCH}-${ORT_VERSION}.tgz"
+tar -xzf "onnxruntime-${ORT_ARCH}-${ORT_VERSION}.tgz"
+
+sudo mkdir -p /usr/local/include/onnxruntime /usr/local/lib
+sudo cp "onnxruntime-${ORT_ARCH}-${ORT_VERSION}"/include/*.h /usr/local/include/onnxruntime/
+sudo cp "onnxruntime-${ORT_ARCH}-${ORT_VERSION}"/lib/libonnxruntime.so* /usr/local/lib/
+sudo ldconfig
+```
+
+### Backend
 
 ```bash
 cd sfu
-go mod download
-```
-
-### 3. API keys & env
-
-Copy the example env file and fill in your keys:
-
-```bash
-cd sfu
+./scripts/download-model.sh
+go mod tidy
 cp .env.example .env
 ```
 
-Edit `sfu/.env` — never commit this file.
-
-| Variable | Required for |
-|----------|----------------|
-| `OPENAI_API_KEY` | LLM (OpenAI) |
-| `DEEPGRAM_API_KEY` | Speech-to-text |
-| `RIME_API_KEY` | Text-to-speech |
-| `ONNXRUNTIME_LIB_PATH` | Silero VAD — path to `libonnxruntime` on your machine |
-| `SILERO_MODEL_PATH` | Silero VAD — path to `silero_vad.onnx` (see `sfu/assets/models/`) |
-| `REDIS_URL` | Redis connection URL (default: `redis://localhost:6379`) |
-| `NODE_ID` | Unique ID for this SFU instance (default: `local`) |
-| `SESSION_MAX_DURATION` | Max room session length, e.g. `30m` (default: `30m`) |
-
-Optional overrides (defaults are fine for local dev):
+Edit `sfu/.env` — add your `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, and `RIME_API_KEY`. See `sfu/.env.example` for the full list.
 
 ```bash
-PORT=8080
-ENV=local
-```
-
-See `sfu/.env.example` for Deepgram / Rime tuning options.
-
-### 4. Redis
-
-Install and start Redis before running the SFU server.
-
-**macOS (Homebrew)**
-
-```bash
-brew install redis
-brew services start redis
-```
-
-Verify Redis is running:
-
-```bash
-redis-cli ping
-# PONG
-```
-
-## Run
-
-Start **Redis** first, then the **browser client**, then the **server** (three terminals).
-
-**Terminal 1 — Redis** (skip if already running as a service)
-
-```bash
-redis-server
-```
-
-**Terminal 2 — browser**
-
-```bash
-cd sfu-frontend
-npm run dev
-```
-
-**Terminal 3 — server**
-
-```bash
-cd sfu
 go run ./cmd/sfu
 ```
 
-Open **http://localhost:3000**, click connect, and allow mic access when prompted.
+### Frontend (new terminal)
 
-## Project layout
+```bash
+cd sfu-frontend
+cp .env.example .env
+bun install
+bun run dev
+```
 
-```
-sfu/            Go SFU + voice agent server (port 8080)
-sfu-frontend/   React debug console (port 3000)
-```
+Open `http://localhost:3000`, click connect, and allow microphone access.
+
+## Contributing
+
+The direction of this project should come from what people actually try to build with it.
+
+If you want a feature or hit a limitation, open an issue with the use case. Provider implementations, transport options, deployment guides, and orchestration changes are all welcome; start with an issue so the approach is clear.
+
+Small fixes and documentation improvements can go straight to a PR.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and PR guidelines.

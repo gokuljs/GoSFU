@@ -6,11 +6,11 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-func CreatePeerConnectionWithInterceptors(stunServer string) (*webrtc.PeerConnection, error) {
+func CreatePeerConnectionWithInterceptors(stunServers []string) (*webrtc.PeerConnection, error) {
 	peerConnectionConfig := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: []string{stunServer},
+				URLs: stunServers,
 			},
 		},
 	}

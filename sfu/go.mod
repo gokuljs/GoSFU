@@ -8,6 +8,8 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/pion/interceptor v0.1.44
 	github.com/pion/webrtc/v4 v4.2.12
+	github.com/redis/go-redis/v9 v9.20.1
+	github.com/yalue/onnxruntime_go v1.31.0
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 )
 
@@ -27,9 +29,7 @@ require (
 	github.com/pion/stun/v3 v3.1.2 // indirect
 	github.com/pion/transport/v4 v4.0.1 // indirect
 	github.com/pion/turn/v5 v5.0.3 // indirect
-	github.com/redis/go-redis/v9 v9.20.1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	github.com/yalue/onnxruntime_go v1.31.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/net v0.50.0 // indirect

@@ -4,15 +4,22 @@
 // Reference: https://github.com/streamer45/silero-vad-go
 //
 // The model needs:
-//   - ONNX Runtime library installed (e.g., /opt/homebrew/lib/libonnxruntime.dylib)
+//   - ONNX Runtime library installed
 //   - the silero_vad.onnx model file (env SILERO_MODEL_PATH)
 //
 // It expects 512 float32 samples per inference at 16kHz. After the first window,
 // we prepend a 64-sample context from the previous window for continuity.
+//
+// For custom ONNX Runtime install paths, set CGO_CFLAGS and CGO_LDFLAGS:
+//   CGO_CFLAGS="-I/path/to/include" CGO_LDFLAGS="-L/path/to/lib -lonnxruntime" go build ./...
 package silero
 
-// #cgo CFLAGS: -Wall -std=c99 -I/opt/homebrew/include
-// #cgo LDFLAGS: -L/opt/homebrew/lib -lonnxruntime
+// #cgo darwin,arm64 CFLAGS: -Wall -std=c99 -I/opt/homebrew/include
+// #cgo darwin,arm64 LDFLAGS: -L/opt/homebrew/lib -lonnxruntime
+// #cgo darwin,amd64 CFLAGS: -Wall -std=c99 -I/usr/local/include
+// #cgo darwin,amd64 LDFLAGS: -L/usr/local/lib -lonnxruntime
+// #cgo linux CFLAGS: -Wall -std=c99 -I/usr/local/include
+// #cgo linux LDFLAGS: -L/usr/local/lib -lonnxruntime
 // #include <stdlib.h>
 // #include <string.h>
 // #include <stdint.h>

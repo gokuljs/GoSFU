@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"log/slog"
 	"os"
+	"time"
 
 	"github.com/gokuljs/goSfu/plugins/llm"
 	"github.com/gokuljs/goSfu/plugins/stt"
@@ -30,24 +32,42 @@ type Options struct {
 // NewConfig builds a ready-to-use Config from explicit options. The orchestrator
 // only sees the resulting interfaces — never env vars or vendor details.
 func NewConfig(opts Options) (Config, error) {
+	configStart := time.Now()
 	opts = opts.withDefaults()
 
+	slog.Info("building STT provider", "provider", opts.STTProvider)
+	t := time.Now()
 	sttP, err := stt.Build(opts.STTProvider, opts.STT)
 	if err != nil {
 		return Config{}, err
 	}
+	slog.Info("STT provider ready", "provider", opts.STTProvider, "elapsed_ms", time.Since(t).Milliseconds())
+
+	slog.Info("building LLM provider", "provider", opts.LLMProvider)
+	t = time.Now()
 	llmP, err := llm.Build(opts.LLMProvider, opts.LLM)
 	if err != nil {
 		return Config{}, err
 	}
+	slog.Info("LLM provider ready", "provider", opts.LLMProvider, "elapsed_ms", time.Since(t).Milliseconds())
+
+	slog.Info("building TTS provider", "provider", opts.TTSProvider)
+	t = time.Now()
 	ttsP, err := tts.Build(opts.TTSProvider, opts.TTS)
 	if err != nil {
 		return Config{}, err
 	}
+	slog.Info("TTS provider ready", "provider", opts.TTSProvider, "elapsed_ms", time.Since(t).Milliseconds())
+
+	slog.Info("building VAD provider", "provider", opts.VADProvider)
+	t = time.Now()
 	vadP, err := vad.Build(opts.VADProvider, opts.VAD)
 	if err != nil {
 		return Config{}, err
 	}
+	slog.Info("VAD provider ready", "provider", opts.VADProvider, "elapsed_ms", time.Since(t).Milliseconds())
+
+	slog.Info("all providers ready", "total_ms", time.Since(configStart).Milliseconds())
 
 	return Config{
 		Plugins: Plugins{

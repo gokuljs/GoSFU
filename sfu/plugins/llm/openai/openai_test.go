@@ -185,21 +185,22 @@ func TestBuild_usesExplicitAPIKey(t *testing.T) {
 }
 
 // TestIntegration_StreamCompletion calls the real OpenAI API.
-// Skipped unless OPENAI_API_KEY is set in the environment.
+// Skipped unless RUN_OPENAI_INTEGRATION=1 and OPENAI_API_KEY are set.
 //
 // Run:
 //
-//	cd sfu && OPENAI_API_KEY=sk-... go test -v ./plugins/llm/openai/ -run Integration
+//	cd sfu && RUN_OPENAI_INTEGRATION=1 OPENAI_API_KEY=sk-... go test -v ./plugins/llm/openai/ -run Integration
 func TestIntegration_StreamCompletion(t *testing.T) {
+	if os.Getenv("RUN_OPENAI_INTEGRATION") != "1" {
+		t.Skip("RUN_OPENAI_INTEGRATION=1 not set; skipping integration test")
+	}
 	key := os.Getenv("OPENAI_API_KEY")
 	if key == "" {
 		t.Skip("OPENAI_API_KEY not set; skipping integration test")
 	}
 
-	temp := 0.2
 	p, err := llm.Build("openai", llm.Options{
-		Model:       "gpt-5.5",
-		Temperature: &temp,
+		Model: "gpt-5.5",
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
