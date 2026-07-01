@@ -85,6 +85,11 @@ Stub providers exist in the repo if you want to skip a provider and test without
 
 Voice activity detection uses [Silero VAD](https://github.com/snakers4/silero-vad) via ONNX Runtime.
 
+There are two separate pieces:
+
+- **ONNX Runtime** is platform-specific. Install the build for your OS and CPU.
+- **`silero_vad.onnx`** is the model file. It is the same on macOS and Linux, and `./scripts/download-model.sh` downloads it later.
+
 macOS:
 
 ```bash
@@ -94,8 +99,16 @@ brew install onnxruntime
 Linux:
 
 ```bash
-# Download from https://github.com/microsoft/onnxruntime/releases
-# Extract and copy headers to /usr/local/include and libs to /usr/local/lib
+ORT_VERSION=1.18.1
+ORT_ARCH=linux-x64 # use linux-aarch64 for ARM64 Linux
+
+curl -LO "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-${ORT_ARCH}-${ORT_VERSION}.tgz"
+tar -xzf "onnxruntime-${ORT_ARCH}-${ORT_VERSION}.tgz"
+
+sudo mkdir -p /usr/local/include/onnxruntime /usr/local/lib
+sudo cp "onnxruntime-${ORT_ARCH}-${ORT_VERSION}"/include/*.h /usr/local/include/onnxruntime/
+sudo cp "onnxruntime-${ORT_ARCH}-${ORT_VERSION}"/lib/libonnxruntime.so* /usr/local/lib/
+sudo ldconfig
 ```
 
 ### Backend
