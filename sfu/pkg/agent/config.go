@@ -3,7 +3,6 @@ package agent
 import (
 	"time"
 
-	"github.com/gokuljs/goSfu/pkg/roomquota"
 	"github.com/gokuljs/goSfu/pkg/roomstream"
 	"github.com/gokuljs/goSfu/pkg/transcript"
 	"github.com/gokuljs/goSfu/plugins/llm"
@@ -19,13 +18,6 @@ type Plugins struct {
 	LLM llm.Provider
 	TTS tts.Provider
 	VAD vad.Provider
-}
-
-type QuotaStore interface {
-	Get(room string) roomquota.State
-	IsExhausted(room string) bool
-	StartTurn(room string, turn int) (roomquota.State, error)
-	CompleteTurn(room string, turn int) (roomquota.State, error)
 }
 
 // Settings are vendor-agnostic behavior knobs owned by the orchestrator.
@@ -45,8 +37,6 @@ type Config struct {
 	RoomID              string
 	TranscriptPublisher transcript.Publisher
 	MetricsPublisher    roomstream.MetricsPublisher
-	QuotaStore          QuotaStore
-	QuotaPublisher      roomstream.QuotaPublisher
 }
 
 func DefaultSettings() Settings {
