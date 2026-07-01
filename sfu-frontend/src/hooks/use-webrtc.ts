@@ -1,7 +1,18 @@
 import { useRef, useState, useCallback } from "react"
 
 export const SFU_URL = import.meta.env.VITE_SFU_URL ?? "http://localhost:8080"
-const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }]
+const DEFAULT_STUN_URLS = [
+  "stun:stun.l.google.com:19302",
+  "stun:stun1.l.google.com:19302",
+  "stun:stun.cloudflare.com:3478",
+]
+const STUN_URLS: string[] = (
+  import.meta.env.VITE_STUN_URLS ?? DEFAULT_STUN_URLS.join(",")
+)
+  .split(",")
+  .map((url: string) => url.trim())
+  .filter(Boolean)
+const ICE_SERVERS = [{ urls: STUN_URLS }]
 const ICE_GATHERING_TIMEOUT_MS = 3000
 const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
