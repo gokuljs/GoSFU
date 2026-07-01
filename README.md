@@ -4,7 +4,7 @@ A forkable WebRTC voice agent server in Go.
 
 Handles the audio transport, turn orchestration, pacing, and barge-in so you can focus on your agent logic.
 
-[![license](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE) [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev) [![WebRTC](https://img.shields.io/badge/WebRTC-Pion-4285F4?logo=webrtc&logoColor=white)](https://github.com/pion/webrtc) [![Watch demo](https://img.shields.io/badge/demo-YouTube-FF0000?logo=youtube&logoColor=white)](https://youtu.be/ZRbSO5N5Q8o?si=rxhzvA9pHx142EFH)
+[![license](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE) [![v0](https://img.shields.io/badge/version-v0-orange)](https://github.com/gokuljs/goSfu) [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev) [![WebRTC](https://img.shields.io/badge/WebRTC-Pion-4285F4?logo=webrtc&logoColor=white)](https://github.com/pion/webrtc) [![Watch demo](https://img.shields.io/badge/demo-YouTube-FF0000?logo=youtube&logoColor=white)](https://youtu.be/ZRbSO5N5Q8o?si=rxhzvA9pHx142EFH)
 
 The interesting part is not that it connects a speech model, a language model, and a voice model. That wiring is the easy part. The hard part is what happens between the microphone and the speaker while the clock is running.
 
