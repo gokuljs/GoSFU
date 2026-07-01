@@ -71,7 +71,7 @@ sfu-frontend/
 
 ### Get API keys
 
-The demo uses these providers. Get keys from each:
+The demo room uses these providers and requires keys from each:
 
 | Role | Provider | Get a key |
 |------|----------|-----------|
@@ -79,7 +79,9 @@ The demo uses these providers. Get keys from each:
 | Speech-to-text | Deepgram | [console.deepgram.com](https://console.deepgram.com/) |
 | Text-to-speech | Rime | [rime.ai](https://rime.ai) |
 
-Stub providers exist in the repo if you want to skip a provider and test without it.
+Stub providers exist in the repo for provider development and custom agent wiring, but the checked-in room demo uses OpenAI, Deepgram, Rime, and Silero VAD.
+
+To use a different vendor, add a provider implementation under `sfu/plugins/`, register it with the matching plugin package, and wire it into the agent config. Provider names only work after their plugin exists.
 
 ### Install ONNX Runtime
 
