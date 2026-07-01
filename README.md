@@ -1,8 +1,8 @@
 # GoSFU
 
-Open-source Go infrastructure for the real-time voice AI loop.
+A forkable WebRTC voice agent server in Go.
 
-A WebRTC voice agent stack focused on the hard parts: audio transport, turn orchestration, pacing, barge-in, and observability.
+Handles the audio transport, turn orchestration, pacing, and barge-in so you can focus on your agent logic.
 
 > Status: Early / Work in Progress
 >
@@ -26,7 +26,7 @@ A text system can wait. A voice system cannot. If audio arrives too early, too l
 
 This repo keeps those moving parts visible.
 
-It is meant to be read, run, forked, and changed. The code shows the full path from browser microphone input to server-side media processing to paced audio output. The debug console shows what the system is doing while the call is running.
+It is meant to be forked. Read the orchestrator, swap the providers, change the turn logic, deploy your own version. The debug console shows what the system is doing while the call is running, so you can see the effect of your changes immediately.
 
 I wrote more about the audio side in [When Latency Becomes Audible](https://gokuljs.com/blogs/when-latency-becomes-audible).
 
@@ -220,8 +220,7 @@ This is early software. It works end to end, but the goal is still to keep the c
 
 Good fits today:
 
-- Reading how a real-time voice loop works.
-- Forking the system for experiments.
+- Forking the system to build your own voice agent backend.
 - Trying different provider combinations.
 - Inspecting latency and event flow while a session runs.
 - Understanding how WebRTC audio has to be shaped for generated speech.
@@ -233,12 +232,10 @@ Not the goal today:
 - A drop-in replacement for mature real-time infrastructure.
 - A fully hardened enterprise deployment.
 
-If you want a feature, open an issue with the use case. The direction should come from what people actually try to build with it.
-
 ## Contributing
 
-This project is still early.
+The direction of this project should come from what people actually try to build with it.
 
-If you want to add a provider, transport, deployment guide, or larger change to the orchestration layer, please open an issue first so the use case and approach are clear.
+If you want a feature or hit a limitation, open an issue with the use case. Provider implementations, transport options, deployment guides, and orchestration changes are all welcome — start with an issue so the approach is clear.
 
-Small fixes, focused PRs, and documentation improvements are welcome.
+Small fixes and documentation improvements can go straight to a PR.
