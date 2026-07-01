@@ -151,8 +151,11 @@ func TestBuild_requiresAPIKey(t *testing.T) {
 
 // TestIntegration_Session streams a short silence buffer to the real Deepgram
 // API and verifies the stream opens and closes cleanly.
-// Run: cd sfu && DEEPGRAM_API_KEY=... go test -v ./plugins/stt/deepgram/ -run Integration
+// Run: cd sfu && RUN_DEEPGRAM_INTEGRATION=1 DEEPGRAM_API_KEY=... go test -v ./plugins/stt/deepgram/ -run Integration
 func TestIntegration_Session(t *testing.T) {
+	if os.Getenv("RUN_DEEPGRAM_INTEGRATION") != "1" {
+		t.Skip("RUN_DEEPGRAM_INTEGRATION=1 not set; skipping integration test")
+	}
 	if os.Getenv("DEEPGRAM_API_KEY") == "" {
 		t.Skip("DEEPGRAM_API_KEY not set; skipping integration test")
 	}

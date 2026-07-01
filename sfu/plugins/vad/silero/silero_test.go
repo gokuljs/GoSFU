@@ -14,9 +14,6 @@ func TestIntegration_SileroDetectsTone(t *testing.T) {
 	if os.Getenv("ONNXRUNTIME_LIB_PATH") == "" || os.Getenv("SILERO_MODEL_PATH") == "" {
 		t.Skip("set ONNXRUNTIME_LIB_PATH and SILERO_MODEL_PATH to run")
 	}
-	if err := initORT(); err != nil {
-		t.Fatal(err)
-	}
 	p, err := New(os.Getenv("SILERO_MODEL_PATH"))
 	if err != nil {
 		t.Fatal(err)

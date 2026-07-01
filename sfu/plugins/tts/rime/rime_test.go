@@ -201,8 +201,11 @@ func TestBuild_requiresAPIKey(t *testing.T) {
 }
 
 // TestIntegration_Synthesize calls the real Rime API.
-// Run: cd sfu && RIME_API_KEY=... go test -v ./plugins/tts/rime/ -run Integration
+// Run: cd sfu && RUN_RIME_INTEGRATION=1 RIME_API_KEY=... go test -v ./plugins/tts/rime/ -run Integration
 func TestIntegration_Synthesize(t *testing.T) {
+	if os.Getenv("RUN_RIME_INTEGRATION") != "1" {
+		t.Skip("RUN_RIME_INTEGRATION=1 not set; skipping integration test")
+	}
 	if os.Getenv("RIME_API_KEY") == "" {
 		t.Skip("RIME_API_KEY not set; skipping integration test")
 	}
