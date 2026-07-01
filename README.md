@@ -111,10 +111,10 @@ sfu-frontend/
 - Go 1.26+
 - Node.js 20+
 - Redis 7+ if you want shared room state and live event fanout
-- API keys for the providers you enable
-- ONNX Runtime and a Silero model if you use the Silero VAD provider
+- API keys for the current demo providers: OpenAI, Deepgram, and Rime
+- ONNX Runtime and a Silero model for voice activity detection
 
-The default local provider setup can use stubs for most components. Real calls require the corresponding provider keys.
+Stub providers exist in the repo, but the current browser demo path is wired to OpenAI, Deepgram, Rime, and Silero in `sfu/pkg/room/room.go`. If you want to run the full demo without changing code, configure those providers.
 
 ## Setup
 
@@ -147,15 +147,13 @@ Important environment variables:
 - `REDIS_URL`: Redis connection string, for example `redis://localhost:6379`.
 - `NODE_ID`: identifier for this server process. Defaults to `local`.
 - `SESSION_MAX_DURATION`: maximum session length, for example `30m`.
-- `LLM_PROVIDER`: `stub` or `openai`.
-- `STT_PROVIDER`: `stub` or `deepgram`.
-- `TTS_PROVIDER`: `stub` or `rime`.
-- `VAD_PROVIDER`: `stub` or `silero`.
 - `OPENAI_API_KEY`: required when using the OpenAI provider.
 - `DEEPGRAM_API_KEY`: required when using the Deepgram provider.
 - `RIME_API_KEY`: required when using the Rime provider.
 - `ONNXRUNTIME_LIB_PATH`: path to the ONNX Runtime library when using Silero.
 - `SILERO_MODEL_PATH`: path to the Silero model file when using Silero.
+
+`LLM_PROVIDER`, `STT_PROVIDER`, `TTS_PROVIDER`, and `VAD_PROVIDER` are used by `agent.DefaultOptions()` and custom agent configuration. The current room join path uses explicit provider names instead.
 
 See `sfu/.env.example` for provider-specific defaults.
 
