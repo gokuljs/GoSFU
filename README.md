@@ -1,6 +1,12 @@
 # GoSFU
 
-GoSFU is a from-scratch real-time voice agent stack written in Go and React.
+Open-source Go infrastructure for the real-time voice AI loop.
+
+A WebRTC voice agent stack focused on the hard parts: audio transport, turn orchestration, pacing, barge-in, and observability.
+
+> Status: Early / Work in Progress
+>
+> Working end-to-end demo. Not production hardened.
 
 The interesting part is not that it connects a speech model, a language model, and a voice model. That wiring is the easy part. The hard part is what happens between the microphone and the speaker while the clock is running.
 
@@ -230,3 +236,11 @@ Not the goal today:
 - A fully hardened enterprise deployment.
 
 If you want a feature, open an issue with the use case. The direction should come from what people actually try to build with it.
+
+## Contributing
+
+This project is still early.
+
+If you want to add a provider, transport, deployment guide, or larger change to the orchestration layer, please open an issue first so the use case and approach are clear.
+
+Small fixes, focused PRs, and documentation improvements are welcome.
