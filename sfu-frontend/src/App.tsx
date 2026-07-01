@@ -77,7 +77,6 @@ function RoomRoute() {
   const stream = useRoomStream(activeRoomId, SFU_URL)
   const { addLocalEvent } = stream
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
-  const exhaustedToastRoomRef = useRef<string | null>(null)
   const expiredHandledRef = useRef(false)
   const sessionActive = connectionState === "connected"
   const sessionTimer = useSessionTimer(sessionActive)
@@ -178,24 +177,6 @@ function RoomRoute() {
     })
   }, [addLocalEvent, routeRoomId, isCameraOn])
 
-  useEffect(() => {
-    if (!stream.quota?.exhausted) {
-      exhaustedToastRoomRef.current = null
-      return
-    }
-    const toastRoom = stream.quota.room || routeRoomId || "current"
-    if (exhaustedToastRoomRef.current === toastRoom) return
-
-    exhaustedToastRoomRef.current = toastRoom
-    toast.error("Session quota exhausted", {
-      id: `session-quota-${toastRoom}`,
-      description:
-        stream.quota.message ||
-        "You are out of usage quota. Further voice requests are blocked for this session.",
-      duration: 8000,
-    })
-  }, [routeRoomId, stream.quota])
-
   if (!routeRoomId) {
     return <Navigate to="/" replace />
   }
@@ -213,7 +194,6 @@ function RoomRoute() {
       debugEvents={stream.debugEvents}
       transcript={stream.transcript}
       metrics={stream.metrics}
-      quota={stream.quota}
       latestByStage={stream.latestByStage}
       onClearEvents={stream.clearEvents}
       isMicOn={isMicOn}

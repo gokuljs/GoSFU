@@ -9,20 +9,18 @@ import (
 	"github.com/gokuljs/goSfu/pkg/config"
 	"github.com/gokuljs/goSfu/pkg/logger"
 	"github.com/gokuljs/goSfu/pkg/redisroom"
-	"github.com/gokuljs/goSfu/pkg/roomquota"
 	"github.com/gokuljs/goSfu/pkg/roomstream"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
 type Manager struct {
-	rooms       map[string]*Room
-	mu          sync.RWMutex
-	audioPath   string
-	stream      *roomstream.Hub
-	quota       *roomquota.Store
-	redis       *redisroom.Store
-	sessionMax  time.Duration
+	rooms      map[string]*Room
+	mu         sync.RWMutex
+	audioPath  string
+	stream     *roomstream.Hub
+	redis      *redisroom.Store
+	sessionMax time.Duration
 }
 
 func NewManager(redisStore *redisroom.Store, sessionMax time.Duration) *Manager {
@@ -34,13 +32,11 @@ func NewManager(redisStore *redisroom.Store, sessionMax time.Duration) *Manager 
 		rdb = redisStore.Client()
 	}
 	stream := roomstream.NewHub(rdb)
-	quota := roomquota.NewStore(roomquota.DefaultLimit)
 	logger.SetPipelineSink(stream.PublishPipeline)
 	return &Manager{
 		rooms:      make(map[string]*Room),
 		audioPath:  config.DEFAULT_AUDIO_SAMPLE_FILE,
 		stream:     stream,
-		quota:      quota,
 		redis:      redisStore,
 		sessionMax: sessionMax,
 	}
@@ -48,7 +44,7 @@ func NewManager(redisStore *redisroom.Store, sessionMax time.Duration) *Manager 
 
 func (m *Manager) Create() string {
 	id := uuid.New().String()
-	room := NewRoom(id, m.stream, m.quota, m.sessionMax, func(roomCloseId string) {
+	room := NewRoom(id, m.stream, m.sessionMax, func(roomCloseId string) {
 		m.Delete(roomCloseId)
 	}, m.onActivity, m.onWaiting)
 	m.mu.Lock()
@@ -62,7 +58,6 @@ func (m *Manager) Create() string {
 	}
 
 	slog.Info("room created", "room", id)
-	m.stream.PublishQuota(id, m.quota.Reset(id))
 	m.stream.PublishEvent(id, "session.room.created", "info", "Room created", nil)
 	return id
 }
@@ -101,7 +96,6 @@ func (m *Manager) Delete(id string) {
 	}
 	delete(m.rooms, id)
 	slog.Info("room deleted", "room", id)
-	m.quota.Delete(id)
 	m.stream.ClearRoom(id)
 	if m.redis != nil && m.redis.Enabled() {
 		if err := m.redis.Delete(context.Background(), id); err != nil {

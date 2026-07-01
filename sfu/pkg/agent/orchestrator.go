@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -10,7 +9,6 @@ import (
 	"github.com/gokuljs/goSfu/pkg/agent/audio"
 	"github.com/gokuljs/goSfu/pkg/agent/transport"
 	"github.com/gokuljs/goSfu/pkg/logger"
-	"github.com/gokuljs/goSfu/pkg/roomquota"
 	"github.com/gokuljs/goSfu/pkg/roomstream"
 	"github.com/gokuljs/goSfu/pkg/transcript"
 	"github.com/gokuljs/goSfu/plugins/llm"
@@ -68,7 +66,6 @@ type Orchestrator struct {
 	firstTranscriptAt  time.Time
 	firstTranscriptHit bool
 	utteranceTurn      int
-	quotaBlocked       bool
 }
 
 type responseResult struct {
@@ -103,31 +100,6 @@ func (o *Orchestrator) emitMetric(turn int, stage, name, unit string, value floa
 		Unit:  unit,
 		Meta:  meta,
 	})
-}
-
-func (o *Orchestrator) publishQuota(state roomquota.State) {
-	if o.cfg.QuotaPublisher == nil {
-		return
-	}
-	o.cfg.QuotaPublisher.PublishQuota(o.room(), state)
-}
-
-func (o *Orchestrator) quotaExhausted() bool {
-	return o.cfg.QuotaStore != nil && o.cfg.QuotaStore.IsExhausted(o.room())
-}
-
-func (o *Orchestrator) publishQuotaBlocked(turn int) {
-	if o.quotaBlocked {
-		return
-	}
-	o.quotaBlocked = true
-	logger.Pipeline(slog.LevelError, logger.EventQuotaExceeded,
-		"You are out of usage quota. Further voice requests are blocked for this session.",
-		"room", o.room(), "turn", turn,
-	)
-	if o.cfg.QuotaStore != nil {
-		o.publishQuota(o.cfg.QuotaStore.Get(o.room()))
-	}
 }
 
 func (o *Orchestrator) resetUtteranceTiming() {
@@ -203,11 +175,6 @@ func (o *Orchestrator) Run(ctx context.Context) {
 
 // onAudio forks one inbound frame to VAD (turn detection) and STT (transcription).
 func (o *Orchestrator) onAudio(ctx context.Context, sttSess stt.Session, frame audio.Frame, sttRate, vadRate int) {
-	if o.quotaExhausted() {
-		o.publishQuotaBlocked(o.turn + 1)
-		return
-	}
-
 	// VAD on a copy resampled to the model's rate.
 	vf := audio.Frame{
 		Samples:    audio.Resample(frame.Samples, frame.SampleRate, vadRate),
@@ -406,21 +373,6 @@ func (o *Orchestrator) maybeEndTurn(ctx context.Context) {
 	}
 
 	o.turn++
-	if o.cfg.QuotaStore != nil {
-		state, err := o.cfg.QuotaStore.StartTurn(o.room(), o.turn)
-		o.publishQuota(state)
-		if err != nil {
-			if errors.Is(err, roomquota.ErrExhausted) {
-				o.publishQuotaBlocked(o.turn)
-				return
-			}
-			logger.Pipeline(slog.LevelError, logger.EventQuotaExceeded,
-				"Session quota check failed",
-				"room", o.room(), "turn", o.turn, "error", err,
-			)
-			return
-		}
-	}
 	logger.Pipeline(slog.LevelInfo, logger.EventTurnReady,
 		"Transcript ready — sending to LLM",
 		"room", o.room(), "turn", o.turn,
@@ -495,11 +447,6 @@ func (o *Orchestrator) startGreeting(ctx context.Context, text string) {
 // → TTS → speaker. It runs off the main orchestrator loop so inbound VAD can
 // keep detecting barge-in while the agent is speaking.
 func (o *Orchestrator) runResponse(ctx context.Context, turn int, started time.Time, history []llm.Message, userText string) (string, bool) {
-	if o.quotaExhausted() {
-		o.publishQuotaBlocked(turn)
-		return "", false
-	}
-
 	logger.Pipeline(slog.LevelInfo, logger.EventLLMRequest,
 		"Sending transcript to LLM",
 		"room", o.room(), "turn", turn,
@@ -597,13 +544,6 @@ func (o *Orchestrator) runResponse(ctx context.Context, turn int, started time.T
 		"room", o.room(), "turn", turn,
 		"e2e_ms", time.Since(started).Milliseconds(),
 	)
-	if o.cfg.QuotaStore != nil {
-		state, err := o.cfg.QuotaStore.CompleteTurn(o.room(), turn)
-		o.publishQuota(state)
-		if errors.Is(err, roomquota.ErrExhausted) {
-			o.publishQuotaBlocked(turn)
-		}
-	}
 
 	return full.String(), true
 }
@@ -615,11 +555,6 @@ func (o *Orchestrator) runResponse(ctx context.Context, turn int, started time.T
 // utterance StreamResampler converts to 48k without per-chunk drift, and a
 // SampleBuffer reframes the continuous stream into 20ms frames.
 func (o *Orchestrator) speak(ctx context.Context, turn int, text string) bool {
-	if o.quotaExhausted() {
-		o.publishQuotaBlocked(turn)
-		return false
-	}
-
 	logger.Pipeline(slog.LevelInfo, logger.EventTTSRequest,
 		"TTS synthesizing sentence",
 		"room", o.room(), "turn", turn,

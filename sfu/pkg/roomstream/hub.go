@@ -11,7 +11,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gokuljs/goSfu/pkg/redisroom"
-	"github.com/gokuljs/goSfu/pkg/roomquota"
 	"github.com/gokuljs/goSfu/pkg/sessiondebug"
 	"github.com/gokuljs/goSfu/pkg/transcript"
 	"github.com/google/uuid"
@@ -22,12 +21,10 @@ const (
 	ChannelTranscript = "transcript"
 	ChannelDebug      = "debug"
 	ChannelMetrics    = "metrics"
-	ChannelQuota      = "quota"
 
 	transcriptHistoryLimit = 50
 	debugHistoryLimit      = 300
 	metricsHistoryLimit    = 200
-	quotaHistoryLimit      = 20
 )
 
 // Message is the envelope sent over the room WebSocket.
@@ -119,13 +116,6 @@ func (h *Hub) PublishEvent(room, typ, level, msg string, attrs map[string]any) {
 	})
 }
 
-func (h *Hub) PublishQuota(room string, state roomquota.State) {
-	if h == nil || strings.TrimSpace(room) == "" {
-		return
-	}
-	h.publish(ChannelQuota, room, QuotaUpdateFromState(state), false)
-}
-
 func (h *Hub) PublishPipeline(level slog.Level, event, msg string, attrs ...any) {
 	values := sessiondebug.AttrsMap(attrs...)
 	room, _ := values["room"].(string)
@@ -195,8 +185,6 @@ func historyLimit(channel string) int {
 		return transcriptHistoryLimit
 	case ChannelMetrics:
 		return metricsHistoryLimit
-	case ChannelQuota:
-		return quotaHistoryLimit
 	default:
 		return debugHistoryLimit
 	}

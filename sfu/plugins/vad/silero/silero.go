@@ -152,6 +152,10 @@ type Provider struct {
 }
 
 func New(modelPath string) (*Provider, error) {
+	if _, err := os.Stat(modelPath); err != nil {
+		return nil, fmt.Errorf("silero: model file not found at %q (run scripts/download-model.sh): %w", modelPath, err)
+	}
+
 	p := &Provider{
 		api:      C.gosfu_ort_api(),
 		cStrings: make(map[string]*C.char),

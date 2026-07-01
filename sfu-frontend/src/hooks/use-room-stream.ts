@@ -48,18 +48,8 @@ export interface MetricPoint {
   unit: string
 }
 
-export interface QuotaState {
-  room: string
-  limit: number
-  used: number
-  activeTurn?: number
-  exhausted: boolean
-  message: string
-  ts: string
-}
-
 interface StreamEnvelope {
-  channel: "transcript" | "debug" | "metrics" | "quota"
+  channel: "transcript" | "debug" | "metrics"
   data: unknown
 }
 
@@ -87,7 +77,6 @@ export interface UseRoomStreamReturn {
   transcript: TranscriptMessage[]
   debugEvents: DebugEvent[]
   metrics: MetricPoint[]
-  quota: QuotaState | null
   latestByStage: Record<string, Record<string, MetricPoint>>
   addLocalEvent: (
     type: string,
@@ -136,7 +125,6 @@ export function useRoomStream(
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([])
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([])
   const [metrics, setMetrics] = useState<MetricPoint[]>([])
-  const [quota, setQuota] = useState<QuotaState | null>(null)
   const [status, setStatus] = useState<StreamConnectionState>("idle")
   const pendingDebugEventsRef = useRef<DebugEvent[]>([])
   const pendingMetricsRef = useRef<MetricPoint[]>([])
@@ -269,7 +257,6 @@ export function useRoomStream(
         setTranscript([])
         setDebugEvents([])
         setMetrics([])
-        setQuota(null)
       }, 0)
       return () => window.clearTimeout(timeout)
     }
@@ -298,9 +285,6 @@ export function useRoomStream(
             break
           case "metrics":
             applyMetric(envelope.data as MetricUpdate)
-            break
-          case "quota":
-            setQuota(envelope.data as QuotaState)
             break
         }
       } catch {
@@ -377,7 +361,6 @@ export function useRoomStream(
     transcript,
     debugEvents,
     metrics,
-    quota,
     latestByStage,
     addLocalEvent,
     clearEvents: useCallback(() => {
