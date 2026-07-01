@@ -4,7 +4,7 @@ A forkable WebRTC voice agent server in Go.
 
 Handles the audio transport, turn orchestration, pacing, and barge-in so you can focus on your agent logic.
 
-[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev) [![status](https://img.shields.io/badge/status-early-orange)](https://github.com/gokuljs/goSfu)
+[![license](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE) [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev) [![WebRTC](https://img.shields.io/badge/WebRTC-Pion-4285F4?logo=webrtc&logoColor=white)](https://github.com/pion/webrtc) [![Watch demo](https://img.shields.io/badge/demo-YouTube-FF0000?logo=youtube&logoColor=white)](https://youtu.be/ZRbSO5N5Q8o?si=rxhzvA9pHx142EFH)
 
 The interesting part is not that it connects a speech model, a language model, and a voice model. That wiring is the easy part. The hard part is what happens between the microphone and the speaker while the clock is running.
 
@@ -13,8 +13,6 @@ Browser audio arrives as Opus over WebRTC. The server decodes it into PCM, resam
 If the user interrupts while the agent is speaking, the current response is cancelled and the queued audio is cleared. The system goes back to listening.
 
 That loop is the project.
-
-[![Watch the GoSFU demo on YouTube](https://img.shields.io/badge/Watch%20demo-YouTube-red?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/ZRbSO5N5Q8o?si=rxhzvA9pHx142EFH)
 
 ## Why This Exists
 
