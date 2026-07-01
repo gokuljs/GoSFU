@@ -4,9 +4,7 @@ A forkable WebRTC voice agent server in Go.
 
 Handles the audio transport, turn orchestration, pacing, and barge-in so you can focus on your agent logic.
 
-> Status: Early / Work in Progress
->
-> Working end-to-end demo. Not production hardened.
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev) [![status](https://img.shields.io/badge/status-early-orange)](https://github.com/gokuljs/goSfu)
 
 The interesting part is not that it connects a speech model, a language model, and a voice model. That wiring is the easy part. The hard part is what happens between the microphone and the speaker while the clock is running.
 
