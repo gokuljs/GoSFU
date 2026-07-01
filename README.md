@@ -141,6 +141,8 @@ Open `http://localhost:3000`, click connect, and allow microphone access.
 
 The direction of this project should come from what people actually try to build with it.
 
-If you want a feature or hit a limitation, open an issue with the use case. Provider implementations, transport options, deployment guides, and orchestration changes are all welcome start with an issue so the approach is clear.
+If you want a feature or hit a limitation, open an issue with the use case. Provider implementations, transport options, deployment guides, and orchestration changes are all welcome; start with an issue so the approach is clear.
 
 Small fixes and documentation improvements can go straight to a PR.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and PR guidelines.
