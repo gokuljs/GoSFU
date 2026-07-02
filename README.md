@@ -67,7 +67,7 @@ sfu-frontend/
 
 ## Quickstart
 
-**Requirements:** Go 1.26+, Node.js 20+. Redis is optional — leave `REDIS_URL` unset to use the in-memory fallback.
+**Requirements:** Go 1.26+, Bun 1.3+. Redis is optional — leave `REDIS_URL` unset to use the in-memory fallback.
 
 ### Get API keys
 
