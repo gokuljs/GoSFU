@@ -33,8 +33,8 @@ import (
 
 const (
 	defaultBaseURL    = "wss://users-ws.rime.ai/ws3"
-	defaultModel      = "mistv2"
-	defaultSpeaker    = "cove"
+	defaultModel      = "coda"
+	defaultSpeaker    = "lintel"
 	defaultSampleRate = 24000
 	maxReadBytes      = 16 << 20 // base64 audio chunks can be large
 )
@@ -64,7 +64,7 @@ func build(opts tts.Options) (tts.Provider, error) {
 type Config struct {
 	APIKey     string
 	BaseURL    string // ws3 endpoint
-	Model      string // modelId: coda | arcana | mistv1 | mistv2
+	Model      string // modelId: coda | arcana | mistv3 | mistv2 | mistv1
 	Speaker    string // voice; must be valid for the model
 	SampleRate int    // 8000|16000|22050|24000|44100|48000|96000
 }
