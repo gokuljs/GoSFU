@@ -130,12 +130,16 @@ function RoomRoute() {
   }, [routeRoomId, stopSession])
 
   const handleDisconnect = useCallback(async () => {
-    if (routeRoomId) {
-      await deleteRoom(routeRoomId)
-    } else {
-      disconnect()
-    }
+    disconnect()
     navigate("/")
+
+    if (routeRoomId) {
+      try {
+        await deleteRoom(routeRoomId)
+      } catch (err) {
+        console.warn("Room cleanup failed:", err)
+      }
+    }
   }, [deleteRoom, disconnect, navigate, routeRoomId])
 
   const canEditPrompt =
