@@ -30,3 +30,20 @@ RUN case "${TARGETARCH}" in \
 WORKDIR /src/sfu
 COPY go.mod go.sum ./
 RUN go mod download
+
+RUN mkdir -p assets/models && \
+    curl -fL --retry 3 \
+      -o assets/models/silero_vad.onnx \
+      "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx"
+
+ENV CGO_ENABLED=1
+
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    libopus0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/lib/libonnxruntime.so* /usr/local/lib/
