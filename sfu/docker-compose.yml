@@ -1,13 +1,13 @@
 services:
   sfu:
     build:
-      context: ./sfu
+      context: .
       dockerfile: Dockerfile
     container_name: gosfu-sfu
     ports:
       - "8080:8080"
     env_file:
-      - ./sfu/.env
+      - .env
     environment:
       ENV: local
       NODE_ID: local
