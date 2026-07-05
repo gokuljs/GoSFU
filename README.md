@@ -143,8 +143,6 @@ Open `http://localhost:3000`, click connect, and allow microphone access.
 
 GoSFU can run with STUN only for simple local networks, but production WebRTC deployments should provide a TURN server. TURN gives browsers a relay path when direct ICE candidates fail because of strict NATs, firewalls, or container networking.
 
-The SFU exposes ICE config from the backend at `/ice-config`. Configure TURN in `sfu/.env`; the frontend fetches the same config before it creates the browser `RTCPeerConnection`. Keep STUN configured and add TURN as the fallback relay path.
-
 ### Install Docker
 
 If Docker is not installed, install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and confirm it is running:
