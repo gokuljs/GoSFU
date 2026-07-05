@@ -233,9 +233,6 @@ TURN_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?tr
 TURN_USERNAME=gosfu
 TURN_CREDENTIAL=replace-with-a-strong-password
 ```
-
-Do not commit real TURN credentials. If the SFU itself runs in Docker and coturn runs on the Docker host, use `host.docker.internal` for local Docker testing, or the real TURN DNS name/IP in production.
-
 ## Contributing
 
 The direction of this project should come from what people actually try to build with it.
