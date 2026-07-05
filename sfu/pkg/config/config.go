@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"strings"
+
+	"github.com/pion/webrtc/v4"
 )
 
 var DefaultSTUNServers = []string{
@@ -16,21 +18,37 @@ const (
 	DEFAULT_AUDIO_SAMPLE_FILE = "assets/sample.ogg"
 )
 
-func STUNServers() []string {
-	raw := os.Getenv("STUN_URLS")
-	if raw == "" {
-		return DefaultSTUNServers
+func ICEServers() []webrtc.ICEServer {
+	servers := []webrtc.ICEServer{
+		{URLs: STUNServers()},
 	}
 
+	if turnURLs := splitURLs(os.Getenv("TURN_URLS")); len(turnURLs) > 0 {
+		servers = append(servers, webrtc.ICEServer{
+			URLs:       turnURLs,
+			Username:   strings.TrimSpace(os.Getenv("TURN_USERNAME")),
+			Credential: strings.TrimSpace(os.Getenv("TURN_CREDENTIAL")),
+		})
+	}
+
+	return servers
+}
+
+func STUNServers() []string {
+	urls := splitURLs(os.Getenv("STUN_URLS"))
+	if len(urls) == 0 {
+		return DefaultSTUNServers
+	}
+	return urls
+}
+
+func splitURLs(raw string) []string {
 	parts := strings.Split(raw, ",")
 	urls := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if url := strings.TrimSpace(part); url != "" {
 			urls = append(urls, url)
 		}
-	}
-	if len(urls) == 0 {
-		return DefaultSTUNServers
 	}
 	return urls
 }

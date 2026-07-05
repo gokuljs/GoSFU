@@ -100,7 +100,7 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription, systemPrompt string) 
 		"participant_id": participantId,
 	})
 
-	pc, err := sfu.CreatePeerConnectionWithInterceptors(config.STUNServers())
+	pc, err := sfu.CreatePeerConnectionWithInterceptors(config.ICEServers())
 	if err != nil {
 		return nil, err
 	}

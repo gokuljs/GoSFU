@@ -6,13 +6,27 @@ const DEFAULT_STUN_URLS = [
   "stun:stun1.l.google.com:19302",
   "stun:stun.cloudflare.com:3478",
 ]
-const STUN_URLS: string[] = (
-  import.meta.env.VITE_STUN_URLS ?? DEFAULT_STUN_URLS.join(",")
-)
+const splitURLs = (raw: string): string[] =>
+  raw
   .split(",")
   .map((url: string) => url.trim())
   .filter(Boolean)
-const ICE_SERVERS = [{ urls: STUN_URLS }]
+
+const STUN_URLS = splitURLs(
+  import.meta.env.VITE_STUN_URLS ?? DEFAULT_STUN_URLS.join(",")
+)
+const TURN_URLS = splitURLs(import.meta.env.VITE_TURN_URLS ?? "")
+const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME?.trim()
+const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL?.trim()
+
+const ICE_SERVERS: RTCIceServer[] = [{ urls: STUN_URLS }]
+if (TURN_URLS.length > 0) {
+  ICE_SERVERS.push({
+    urls: TURN_URLS,
+    username: TURN_USERNAME || undefined,
+    credential: TURN_CREDENTIAL || undefined,
+  })
+}
 const ICE_GATHERING_TIMEOUT_MS = 3000
 const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
