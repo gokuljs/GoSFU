@@ -1,0 +1,45 @@
+services:
+  sfu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gosfu-sfu
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      ENV: local
+      NODE_ID: local
+      PORT: 8080
+      SILERO_MODEL_PATH: /app/assets/models/silero_vad.onnx
+      TURN_URLS: "turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp"
+      TURN_USERNAME: gosfu
+      TURN_CREDENTIAL: change-me
+    depends_on:
+      - coturn
+    restart: unless-stopped
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: gosfu-coturn
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49160-49200:49160-49200/udp"
+    command:
+      - -n
+      - --log-file=stdout
+      - --verbose
+      - --listening-port=3478
+      - --listening-ip=0.0.0.0
+      - --fingerprint
+      - --lt-cred-mech
+      - --user=gosfu:change-me
+      - --realm=localhost
+      - --external-ip=127.0.0.1
+      - --relay-ip=0.0.0.0
+      - --min-port=49160
+      - --max-port=49200
+      - --allow-loopback-peers
+    restart: unless-stopped

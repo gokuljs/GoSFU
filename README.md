@@ -65,13 +65,9 @@ sfu-frontend/
   src/components/       metrics, transcript, session, and audio UI
 ```
 
-## Quickstart
+## Get API Keys
 
-**Requirements:** Go 1.26+, Bun 1.3+. Redis is optional — leave `REDIS_URL` unset to use the in-memory fallback.
-
-### Get API keys
-
-The demo room uses these providers and requires keys from each:
+The demo room requires keys from these three providers:
 
 | Role | Provider | Get a key |
 |------|----------|-----------|
@@ -79,56 +75,48 @@ The demo room uses these providers and requires keys from each:
 | Speech-to-text | Deepgram | [console.deepgram.com](https://console.deepgram.com/) |
 | Text-to-speech | Rime | [rime.ai](https://rime.ai) |
 
-Stub providers exist in the repo for provider development and custom agent wiring, but the checked-in room demo uses OpenAI, Deepgram, Rime, and Silero VAD.
+Stub providers exist in the repo for custom wiring, but the demo room uses OpenAI, Deepgram, Rime, and Silero VAD. To swap a vendor, add a provider under `sfu/plugins/`, register it with the matching plugin package, and wire it into the agent config.
 
-To use a different vendor, add a provider implementation under `sfu/plugins/`, register it with the matching plugin package, and wire it into the agent config. Provider names only work after their plugin exists.
+## Setup
 
-### Install ONNX Runtime
+Pick the path that fits your workflow. Both paths start the same Go server — Docker just handles the system dependencies for you.
 
-Voice activity detection uses [Silero VAD](https://github.com/snakers4/silero-vad) via ONNX Runtime.
+### Option A — Docker (no Go or system libs required)
 
-There are two separate pieces:
+The `docker-compose.yml` starts the SFU and a local coturn TURN relay together. You only need [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 
-- **ONNX Runtime** is platform-specific. Install the build for your OS and CPU.
-- **`silero_vad.onnx`** is the model file. It is the same on macOS and Linux, and `./scripts/download-model.sh` downloads it later.
-
-macOS:
-
-```bash
-brew install onnxruntime
-```
-
-Linux:
-
-```bash
-ORT_VERSION=1.18.1
-ORT_ARCH=linux-x64 # use linux-aarch64 for ARM64 Linux
-
-curl -LO "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-${ORT_ARCH}-${ORT_VERSION}.tgz"
-tar -xzf "onnxruntime-${ORT_ARCH}-${ORT_VERSION}.tgz"
-
-sudo mkdir -p /usr/local/include/onnxruntime /usr/local/lib
-sudo cp "onnxruntime-${ORT_ARCH}-${ORT_VERSION}"/include/*.h /usr/local/include/onnxruntime/
-sudo cp "onnxruntime-${ORT_ARCH}-${ORT_VERSION}"/lib/libonnxruntime.so* /usr/local/lib/
-sudo ldconfig
-```
-
-### Backend
+**1. Copy and fill in the env file**
 
 ```bash
 cd sfu
-./scripts/download-model.sh
-go mod tidy
 cp .env.example .env
 ```
 
-Edit `sfu/.env` — add your `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, and `RIME_API_KEY`. See `sfu/.env.example` for the full list.
+Open `sfu/.env` and set the three required keys:
 
-```bash
-go run ./cmd/sfu
+```env
+OPENAI_API_KEY=...
+DEEPGRAM_API_KEY=...
+RIME_API_KEY=...
 ```
 
-### Frontend (new terminal)
+**2. Start everything**
+
+```bash
+docker compose up --build
+```
+
+This builds the Go binary inside the container (including ONNX Runtime and the Silero model), starts the SFU on port `8080`, and starts coturn on port `3478`. No extra steps needed.
+
+Verify the server is up:
+
+```bash
+curl -s http://localhost:8080/ice-config | python3 -m json.tool
+```
+
+You should see `stun:` and `turn:` entries in the response.
+
+**3. Start the frontend (new terminal)**
 
 ```bash
 cd sfu-frontend
@@ -139,48 +127,91 @@ bun run dev
 
 Open `http://localhost:3000`, click connect, and allow microphone access.
 
-## TURN Server
+---
 
-GoSFU can run with STUN only for simple local networks, but production WebRTC deployments should provide a TURN server. TURN gives browsers a relay path when direct ICE candidates fail because of strict NATs, firewalls, or container networking.
+### Option B — Manual (Go + system libs on the host)
 
-### Install Docker
+**Requirements:** Go 1.26+, Bun 1.3+.
 
-If Docker is not installed, install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and confirm it is running:
+**1. Install ONNX Runtime**
+
+Voice activity detection (Silero VAD) requires ONNX Runtime on the host.
+
+macOS:
 
 ```bash
-docker --version
-docker ps
+brew install onnxruntime
 ```
 
-### Local TURN Test
-
-Use this only when testing everything on one machine: browser, SFU, and coturn. The `--allow-loopback-peers` flag is needed because local testing relays to `127.0.0.1`; do not use that flag as a default production setting.
-
-Choose a username and password, then use the same values in both the Docker command and `sfu/.env`.
+Linux (x64):
 
 ```bash
-docker rm -f coturn 2>/dev/null
+ORT_VERSION=1.18.1
+ORT_ARCH=linux-x64
 
+curl -LO "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-${ORT_ARCH}-${ORT_VERSION}.tgz"
+tar -xzf "onnxruntime-${ORT_ARCH}-${ORT_VERSION}.tgz"
+
+sudo mkdir -p /usr/local/include/onnxruntime /usr/local/lib
+sudo cp "onnxruntime-${ORT_ARCH}-${ORT_VERSION}"/include/*.h /usr/local/include/onnxruntime/
+sudo cp "onnxruntime-${ORT_ARCH}-${ORT_VERSION}"/lib/libonnxruntime.so* /usr/local/lib/
+sudo ldconfig
+```
+
+**2. Download the model and install deps**
+
+```bash
+cd sfu
+./scripts/download-model.sh
+go mod tidy
+```
+
+**3. Configure and run the backend**
+
+```bash
+cp .env.example .env
+```
+
+Open `sfu/.env` and set the three required keys:
+
+```env
+OPENAI_API_KEY=...
+DEEPGRAM_API_KEY=...
+RIME_API_KEY=...
+```
+
+```bash
+go run ./cmd/sfu
+```
+
+**4. Start the frontend (new terminal)**
+
+```bash
+cd sfu-frontend
+cp .env.example .env
+bun install
+bun run dev
+```
+
+Open `http://localhost:3000`, click connect, and allow microphone access.
+
+**TURN relay (optional for local, required for production)**
+
+STUN works for simple same-machine setups. For production behind strict NATs or firewalls, add a TURN relay. Run coturn alongside the SFU:
+
+```bash
 docker run -d --name coturn \
-  -p 3478:3478/udp \
-  -p 3478:3478/tcp \
+  -p 3478:3478/udp -p 3478:3478/tcp \
   -p 49160-49200:49160-49200/udp \
   coturn/coturn:latest \
-  -n --log-file=stdout --verbose \
-  --listening-port=3478 \
-  --listening-ip=0.0.0.0 \
-  --fingerprint \
-  --lt-cred-mech \
-  --user=gosfu:change-me \
-  --realm=localhost \
-  --external-ip=127.0.0.1 \
-  --relay-ip=127.0.0.1 \
-  --min-port=49160 \
-  --max-port=49200 \
+  -n --log-file=stdout --lt-cred-mech --fingerprint \
+  --user=gosfu:change-me --realm=localhost \
+  --external-ip=127.0.0.1 --relay-ip=127.0.0.1 \
+  --min-port=49160 --max-port=49200 \
   --allow-loopback-peers
 ```
 
-Configure `sfu/.env` with matching credentials. Leave `STUN_URLS` unset to keep the default STUN list, or set your own STUN URLs explicitly.
+Then add matching credentials to `sfu/.env` and restart the server:
 
 ```env
 TURN_URLS=turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp
@@ -188,51 +219,33 @@ TURN_USERNAME=gosfu
 TURN_CREDENTIAL=change-me
 ```
 
-Restart the SFU after changing `.env`, then verify the backend returns TURN:
+---
+
+## Production TURN
+
+For a real deployment, run coturn on a host with a stable public IP. Open UDP/TCP `3478` and the relay range (e.g. `49160–49200`).
 
 ```bash
-curl -s http://localhost:8080/ice-config | python3 -m json.tool
-```
-
-You should see the default `stun:` URLs plus the `turn:` URLs with the same username/credential. Open `chrome://webrtc-internals`, join a fresh room, and confirm TURN candidates appear as `typ relay`. coturn logs should show allocate/session activity when the relay path is used:
-
-```bash
-docker logs -f coturn
-```
-
-### Production TURN
-
-For production, run coturn on a host with a stable public IP or DNS name. Open UDP/TCP `3478` and the relay UDP range you choose, for example `49160-49200`.
-
-Replace `YOUR_PUBLIC_IP` with the public IP of the TURN host and choose a strong credential:
-
-```bash
-docker rm -f coturn 2>/dev/null
-
 docker run -d --name coturn --restart unless-stopped \
-  -p 3478:3478/udp \
-  -p 3478:3478/tcp \
+  -p 3478:3478/udp -p 3478:3478/tcp \
   -p 49160-49200:49160-49200/udp \
   coturn/coturn:latest \
-  -n --log-file=stdout \
-  --listening-port=3478 \
-  --listening-ip=0.0.0.0 \
-  --fingerprint \
-  --lt-cred-mech \
-  --user=gosfu:replace-with-a-strong-password \
-  --realm=turn.example.com \
+  -n --log-file=stdout --lt-cred-mech --fingerprint \
+  --user=gosfu:strong-password --realm=turn.example.com \
   --external-ip=YOUR_PUBLIC_IP \
-  --min-port=49160 \
-  --max-port=49200
+  --min-port=49160 --max-port=49200
 ```
 
-Configure the SFU with the same username and password. Keep `STUN_URLS` unset to use the default STUN list, or set it to your own STUN service.
+Set matching values in `sfu/.env`:
 
 ```env
 TURN_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
 TURN_USERNAME=gosfu
-TURN_CREDENTIAL=replace-with-a-strong-password
+TURN_CREDENTIAL=strong-password
 ```
+
+To confirm TURN is wired up, run `curl -s http://localhost:8080/ice-config | python3 -m json.tool` after restarting the SFU. Then open `chrome://webrtc-internals`, join a room, and check that `typ relay` candidates appear.
+
 ## Contributing
 
 The direction of this project should come from what people actually try to build with it.
