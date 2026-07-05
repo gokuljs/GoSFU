@@ -4,6 +4,8 @@ import "net/http"
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /ice-config", s.handleIceConfig)
+	mux.HandleFunc("OPTIONS /ice-config", s.handleIceConfig)
 	mux.HandleFunc("POST /room/create", s.handleCreateRoom)
 	mux.HandleFunc("OPTIONS /room/create", s.handleCreateRoom)
 	mux.HandleFunc("POST /room/{id}/join", s.handleJoinRoom)

@@ -1,18 +1,24 @@
-import { useRef, useState, useCallback } from "react"
+import { useCallback, useRef, useState } from "react"
 
 export const SFU_URL = import.meta.env.VITE_SFU_URL ?? "http://localhost:8080"
-const DEFAULT_STUN_URLS = [
-  "stun:stun.l.google.com:19302",
-  "stun:stun1.l.google.com:19302",
-  "stun:stun.cloudflare.com:3478",
-]
-const STUN_URLS: string[] = (
-  import.meta.env.VITE_STUN_URLS ?? DEFAULT_STUN_URLS.join(",")
-)
-  .split(",")
-  .map((url: string) => url.trim())
-  .filter(Boolean)
-const ICE_SERVERS = [{ urls: STUN_URLS }]
+
+interface IceConfigResponse {
+  iceServers: RTCIceServer[]
+}
+
+async function fetchIceServers(): Promise<RTCIceServer[]> {
+  const res = await fetch(`${SFU_URL}/ice-config`)
+  if (!res.ok) {
+    throw new Error(`ICE config failed: ${res.status}`)
+  }
+
+  const { iceServers } = (await res.json()) as IceConfigResponse
+  if (!Array.isArray(iceServers) || iceServers.length === 0) {
+    throw new Error("ICE config response did not include any servers")
+  }
+  return iceServers
+}
+
 const ICE_GATHERING_TIMEOUT_MS = 3000
 const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
@@ -186,7 +192,13 @@ export function useWebRTC(): UseWebRTCReturn {
         localStreamRef.current = stream
         await refreshDevices(stream)
 
-        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+        const iceServers = await fetchIceServers()
+        if (connectGenerationRef.current !== generation) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+
+        const pc = new RTCPeerConnection({ iceServers })
         pcRef.current = pc
         setPeerConnectionState(pc.connectionState)
         setIceConnectionState(pc.iceConnectionState)

@@ -6,13 +6,9 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-func CreatePeerConnectionWithInterceptors(stunServers []string) (*webrtc.PeerConnection, error) {
+func CreatePeerConnectionWithInterceptors(iceServers []webrtc.ICEServer) (*webrtc.PeerConnection, error) {
 	peerConnectionConfig := webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{
-				URLs: stunServers,
-			},
-		},
+		ICEServers: iceServers,
 	}
 	mediaEngine := &webrtc.MediaEngine{}
 	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {

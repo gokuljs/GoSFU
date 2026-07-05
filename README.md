@@ -139,6 +139,100 @@ bun run dev
 
 Open `http://localhost:3000`, click connect, and allow microphone access.
 
+## TURN Server
+
+GoSFU can run with STUN only for simple local networks, but production WebRTC deployments should provide a TURN server. TURN gives browsers a relay path when direct ICE candidates fail because of strict NATs, firewalls, or container networking.
+
+### Install Docker
+
+If Docker is not installed, install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and confirm it is running:
+
+```bash
+docker --version
+docker ps
+```
+
+### Local TURN Test
+
+Use this only when testing everything on one machine: browser, SFU, and coturn. The `--allow-loopback-peers` flag is needed because local testing relays to `127.0.0.1`; do not use that flag as a default production setting.
+
+Choose a username and password, then use the same values in both the Docker command and `sfu/.env`.
+
+```bash
+docker rm -f coturn 2>/dev/null
+
+docker run -d --name coturn \
+  -p 3478:3478/udp \
+  -p 3478:3478/tcp \
+  -p 49160-49200:49160-49200/udp \
+  coturn/coturn:latest \
+  -n --log-file=stdout --verbose \
+  --listening-port=3478 \
+  --listening-ip=0.0.0.0 \
+  --fingerprint \
+  --lt-cred-mech \
+  --user=gosfu:change-me \
+  --realm=localhost \
+  --external-ip=127.0.0.1 \
+  --relay-ip=127.0.0.1 \
+  --min-port=49160 \
+  --max-port=49200 \
+  --allow-loopback-peers
+```
+
+Configure `sfu/.env` with matching credentials. Leave `STUN_URLS` unset to keep the default STUN list, or set your own STUN URLs explicitly.
+
+```env
+TURN_URLS=turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp
+TURN_USERNAME=gosfu
+TURN_CREDENTIAL=change-me
+```
+
+Restart the SFU after changing `.env`, then verify the backend returns TURN:
+
+```bash
+curl -s http://localhost:8080/ice-config | python3 -m json.tool
+```
+
+You should see the default `stun:` URLs plus the `turn:` URLs with the same username/credential. Open `chrome://webrtc-internals`, join a fresh room, and confirm TURN candidates appear as `typ relay`. coturn logs should show allocate/session activity when the relay path is used:
+
+```bash
+docker logs -f coturn
+```
+
+### Production TURN
+
+For production, run coturn on a host with a stable public IP or DNS name. Open UDP/TCP `3478` and the relay UDP range you choose, for example `49160-49200`.
+
+Replace `YOUR_PUBLIC_IP` with the public IP of the TURN host and choose a strong credential:
+
+```bash
+docker rm -f coturn 2>/dev/null
+
+docker run -d --name coturn --restart unless-stopped \
+  -p 3478:3478/udp \
+  -p 3478:3478/tcp \
+  -p 49160-49200:49160-49200/udp \
+  coturn/coturn:latest \
+  -n --log-file=stdout \
+  --listening-port=3478 \
+  --listening-ip=0.0.0.0 \
+  --fingerprint \
+  --lt-cred-mech \
+  --user=gosfu:replace-with-a-strong-password \
+  --realm=turn.example.com \
+  --external-ip=YOUR_PUBLIC_IP \
+  --min-port=49160 \
+  --max-port=49200
+```
+
+Configure the SFU with the same username and password. Keep `STUN_URLS` unset to use the default STUN list, or set it to your own STUN service.
+
+```env
+TURN_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
+TURN_USERNAME=gosfu
+TURN_CREDENTIAL=replace-with-a-strong-password
+```
 ## Contributing
 
 The direction of this project should come from what people actually try to build with it.

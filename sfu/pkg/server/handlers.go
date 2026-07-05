@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/gokuljs/goSfu/pkg/config"
 	"github.com/gokuljs/goSfu/pkg/room"
 	"github.com/pion/webrtc/v4"
 )
@@ -22,6 +23,22 @@ type joinRoomResponse struct {
 	Sdp           webrtc.SessionDescription `json:"sdp"`
 	ParticipantId string                    `json:"participantId"`
 	RoomId        string                    `json:"roomId"`
+}
+
+type iceConfigResponse struct {
+	ICEServers []webrtc.ICEServer `json:"iceServers"`
+}
+
+func (s *Server) handleIceConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		setCORS(w)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, iceConfigResponse{
+		ICEServers: config.ICEServers(),
+	})
 }
 
 func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
