@@ -13,11 +13,25 @@ services:
       NODE_ID: local
       PORT: 8080
       SILERO_MODEL_PATH: /app/assets/models/silero_vad.onnx
+      REDIS_URL: redis://redis:6379
       TURN_URLS: "turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp"
       TURN_USERNAME: gosfu
       TURN_CREDENTIAL: change-me
     depends_on:
-      - coturn
+      coturn:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: gosfu-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   coturn:
