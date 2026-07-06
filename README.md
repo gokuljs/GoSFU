@@ -46,6 +46,170 @@ Browser mic
 
 While the agent is speaking, inbound audio is still monitored. If speech starts again, the server cancels the response path, clears the playout buffer, and returns to listening.
 
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Browser["Browser · sfu-frontend :3000"]
+        MIC["🎤 Microphone"]
+        SPK["🔊 Speaker"]
+        RTC_C["RTCPeerConnection"]
+        WS_C["WebSocket Client"]
+        DEBUG["Debug Console<br/>transcripts · metrics · events"]
+    end
+
+    subgraph Server["Go Server · sfu :8080"]
+        direction TB
+
+        HTTP["HTTP API<br/>/ice-config · /room/create · /room/:id/join"]
+        WSH["WebSocket Hub<br/>/room/:id/stream"]
+        RM["Room Manager"]
+
+        subgraph Transport["WebRTC Transport · Pion v4"]
+            direction LR
+            INBOUND["Inbound<br/>RTP → Opus decode → PCM 48 kHz"]
+            OUTBOUND["Outbound<br/>PCM → Opus encode → RTP"]
+            PACER["Frame Pacer<br/>20 ms · 200 ms prebuffer"]
+        end
+
+        subgraph Pipeline["Voice Agent Pipeline"]
+            direction TB
+            RESAMP_IN["Resample<br/>48 kHz → 16 kHz"]
+
+            subgraph TurnDetection["Turn Detection"]
+                VAD["Silero VAD<br/>local ONNX · 16 kHz"]
+                STT["Deepgram STT<br/>streaming WS · 16 kHz"]
+            end
+
+            ORCH["Orchestrator<br/>state machine<br/>listening ↔ responding"]
+
+            subgraph Response["Response Generation"]
+                LLM["OpenAI LLM<br/>streaming SSE"]
+                CHUNK["Sentence Chunker"]
+                TTS["Rime TTS<br/>streaming WS · 24 kHz"]
+            end
+
+            RESAMP_OUT["Resample + Fade<br/>24 kHz → 48 kHz"]
+        end
+    end
+
+    subgraph External["External Services"]
+        DG_API["Deepgram API<br/>wss://api.deepgram.com"]
+        OAI_API["OpenAI API<br/>POST /v1/chat/completions"]
+        RIME_API["Rime API<br/>wss://users-ws.rime.ai"]
+        ICE["STUN / TURN<br/>coturn :3478"]
+    end
+
+    REDIS[("Redis<br/>room registry · pub/sub")]
+
+    %% Browser → Server signaling
+    MIC --> RTC_C
+    RTC_C --> SPK
+    RTC_C <-- "SDP offer/answer<br/>via HTTP POST" --> HTTP
+    RTC_C <-- "SRTP audio" --> INBOUND
+    OUTBOUND -- "SRTP audio" --> RTC_C
+    RTC_C <-. "ICE candidates" .-> ICE
+
+    %% Observability path
+    WS_C <-- "transcripts · debug · metrics" --> WSH
+    WS_C --> DEBUG
+
+    %% Server internal
+    HTTP --> RM --> Transport
+    INBOUND --> RESAMP_IN
+    RESAMP_IN --> VAD
+    RESAMP_IN --> STT
+    VAD -- "speech start/end" --> ORCH
+    STT -- "interim/final text" --> ORCH
+    ORCH -- "turn complete" --> LLM
+    LLM --> CHUNK --> TTS
+    TTS --> RESAMP_OUT --> PACER --> OUTBOUND
+    ORCH -. "barge-in:<br/>cancel + clear buffer" .-> PACER
+
+    %% External APIs
+    STT <--> DG_API
+    LLM <--> OAI_API
+    TTS <--> RIME_API
+
+    %% Redis
+    RM <--> REDIS
+    WSH <--> REDIS
+
+    %% Observability from pipeline
+    ORCH -- "events" --> WSH
+
+    classDef browser fill:#1e293b,stroke:#38bdf8,color:#f8fafc
+    classDef server fill:#0f172a,stroke:#818cf8,color:#f8fafc
+    classDef external fill:#1a1a2e,stroke:#f472b6,color:#f8fafc
+    classDef redis fill:#1a1a2e,stroke:#fb923c,color:#f8fafc
+    classDef transport fill:#1e1b4b,stroke:#a78bfa,color:#f8fafc
+    classDef pipeline fill:#0c1a3a,stroke:#34d399,color:#f8fafc
+
+    class MIC,SPK,RTC_C,WS_C,DEBUG browser
+    class HTTP,WSH,RM server
+    class INBOUND,OUTBOUND,PACER transport
+    class RESAMP_IN,VAD,STT,ORCH,LLM,CHUNK,TTS,RESAMP_OUT pipeline
+    class DG_API,OAI_API,RIME_API,ICE external
+    class REDIS redis
+```
+
+**Connection sequence for one voice turn:**
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant H as HTTP API
+    participant R as Room · PeerConnection
+    participant O as Orchestrator
+    participant V as Silero VAD
+    participant DG as Deepgram
+    participant AI as OpenAI
+    participant RM as Rime
+
+    B->>H: POST /room/create
+    H-->>B: { roomId }
+    B->>H: GET /ice-config
+    H-->>B: { iceServers }
+    B->>B: getUserMedia + createOffer
+    B->>H: POST /room/:id/join { sdp, systemPrompt }
+    H->>R: SetRemoteDescription → CreateAnswer
+    H-->>B: { sdp: answer }
+
+    Note over B,R: ICE + DTLS + SRTP connected
+
+    R->>O: agent.Start()
+    O->>RM: greeting text
+    RM-->>O: PCM 24 kHz
+    O->>R: paced Opus → browser speaker
+
+    rect rgb(15, 23, 42)
+        Note over B,DG: User speaks
+        B->>R: RTP Opus packets (mic)
+        R->>O: PCM 48 kHz → resample 16 kHz
+        O->>V: speech frames
+        V-->>O: SpeechStart
+        O->>DG: PCM 16 kHz stream
+        DG-->>O: interim transcripts
+        V-->>O: SpeechEnd
+        DG-->>O: final transcript
+    end
+
+    rect rgb(12, 26, 58)
+        Note over O,RM: Agent responds
+        O->>AI: StreamCompletion(history)
+        AI-->>O: token stream
+
+        loop each sentence
+            O->>RM: synthesize(sentence)
+            RM-->>O: PCM 24 kHz chunks
+            O->>R: resample → reframe → pace → Opus
+            R->>B: agent audio
+        end
+    end
+
+    Note over B,O: If user speaks during response → barge-in → cancel + clear buffer → back to listening
+```
+
 ## Repository Layout
 
 ```text
