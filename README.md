@@ -83,7 +83,7 @@ Pick the path that fits your workflow. Both paths start the same Go server — D
 
 ### Option A — Docker (no Go or system libs required)
 
-The `docker-compose.yml` starts the SFU and a local coturn TURN relay together. You only need [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+The `docker-compose.yml` starts the SFU, a Redis instance, and a local coturn TURN relay together. You only need [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 
 **1. Copy and fill in the env file**
 
@@ -100,13 +100,15 @@ DEEPGRAM_API_KEY=...
 RIME_API_KEY=...
 ```
 
-**2. Start everything**
+You do not need to set `REDIS_URL` for Docker — compose wires the SFU to Redis automatically.
+
+**2. Start the backend stack**
 
 ```bash
 docker compose up --build
 ```
 
-This builds the Go binary inside the container (including ONNX Runtime and the Silero model), starts the SFU on port `8080`, and starts coturn on port `3478`. No extra steps needed.
+This builds the Go binary inside the container (including ONNX Runtime and the Silero model), starts the SFU on port `8080`, Redis on the internal Docker network, and coturn on port `3478`. No extra steps needed.
 
 Verify the server is up:
 
@@ -114,7 +116,13 @@ Verify the server is up:
 curl -s http://localhost:8080/ice-config | python3 -m json.tool
 ```
 
-You should see `stun:` and `turn:` entries in the response.
+You should see `stun:` and `turn:` entries in the response. In the SFU logs, look for `redis=enabled`. To ping Redis inside the stack:
+
+```bash
+docker compose exec redis redis-cli ping
+```
+
+You should see `PONG`.
 
 **3. Start the frontend (new terminal)**
 
