@@ -21,9 +21,10 @@ type Manager struct {
 	stream     *roomstream.Hub
 	redis      *redisroom.Store
 	sessionMax time.Duration
+	loadTest   bool
 }
 
-func NewManager(redisStore *redisroom.Store, sessionMax time.Duration) *Manager {
+func NewManager(redisStore *redisroom.Store, sessionMax time.Duration, loadTest bool) *Manager {
 	if sessionMax <= 0 {
 		sessionMax = 30 * time.Minute
 	}
@@ -39,12 +40,13 @@ func NewManager(redisStore *redisroom.Store, sessionMax time.Duration) *Manager 
 		stream:     stream,
 		redis:      redisStore,
 		sessionMax: sessionMax,
+		loadTest:   loadTest,
 	}
 }
 
 func (m *Manager) Create() string {
 	id := uuid.New().String()
-	room := NewRoom(id, m.stream, m.sessionMax, func(roomCloseId string) {
+	room := NewRoom(id, m.stream, m.sessionMax, m.loadTest, func(roomCloseId string) {
 		m.Delete(roomCloseId)
 	}, m.onActivity, m.onWaiting)
 	m.mu.Lock()

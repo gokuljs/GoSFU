@@ -17,6 +17,7 @@ import (
 func main() {
 	port := flag.Int("port", config.DEFAULT_PORT, "http server port")
 	envName := flag.String("env", envOr("ENV", "local"), "environment (local|development|production)")
+	loadTest := flag.Bool("load-test", false, "use stub AI providers (no external API calls)")
 	flag.Parse()
 
 	logger.Init(logger.EnvFromString(*envName))
@@ -45,9 +46,10 @@ func main() {
 		"redis", redisMode,
 		"node_id", nodeID,
 		"session_max", sessionMax.String(),
+		"load_test", *loadTest,
 	)
 
-	manager := room.NewManager(redisStore, sessionMax)
+	manager := room.NewManager(redisStore, sessionMax, *loadTest)
 	srv := server.New(*port, manager)
 
 	if err := srv.ListenAndServe(); err != nil {

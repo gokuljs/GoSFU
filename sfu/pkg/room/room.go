@@ -42,6 +42,7 @@ type Room struct {
 	State        State
 	Participants []Participant
 	audioPath    string
+	loadTest     bool
 	onClose      func(string)
 	onActivity   func(string)
 	onWaiting    func(string)
@@ -64,6 +65,7 @@ func NewRoom(
 	id string,
 	stream *roomstream.Hub,
 	sessionMax time.Duration,
+	loadTest bool,
 	onClose func(string),
 	onActivity func(string),
 	onWaiting func(string),
@@ -73,6 +75,7 @@ func NewRoom(
 		State:        StateWaiting,
 		Participants: []Participant{},
 		audioPath:    config.DEFAULT_AUDIO_SAMPLE_FILE,
+		loadTest:     loadTest,
 		onClose:      onClose,
 		onActivity:   onActivity,
 		onWaiting:    onWaiting,
@@ -116,13 +119,23 @@ func (r *Room) HandleJoin(offer webrtc.SessionDescription, systemPrompt string) 
 	if prompt := strings.TrimSpace(systemPrompt); prompt != "" {
 		settings.SystemPrompt = prompt
 	}
-	cfg, err := agent.NewConfig(agent.Options{
+	agentOpts := agent.Options{
 		LLMProvider: "openai",
 		STTProvider: "deepgram",
 		TTSProvider: "rime",
 		VADProvider: "silero",
 		Settings:    settings,
-	})
+	}
+	if r.loadTest {
+		agentOpts = agent.Options{
+			LLMProvider: "stub",
+			STTProvider: "stub",
+			TTSProvider: "stub",
+			VADProvider: "stub",
+			Settings:    settings,
+		}
+	}
+	cfg, err := agent.NewConfig(agentOpts)
 	if err != nil {
 		r.stopSessionLocked()
 		return nil, err
