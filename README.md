@@ -20,8 +20,7 @@ It is meant to be forked. Read the orchestrator, swap the providers, change the 
 
 I wrote more about the audio side in [When Latency Becomes Audible](https://gokuljs.com/blogs/when-latency-becomes-audible).
 
-**<img width="1205" height="720" alt="image" src="https://github.com/user-attachments/assets/3c0406cf-9cd7-496a-93f6-59b6fd6ad9da" />
-**
+<img width="1205" height="720" alt="image" src="https://github.com/user-attachments/assets/3c0406cf-9cd7-496a-93f6-59b6fd6ad9da" />
 
 **Features:**
 
